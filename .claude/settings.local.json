@@ -31,7 +31,15 @@
       "Bash(npx shadcn@latest add input card label tabs)",
       "Bash(find /c/Users/user/Desktop/gitlab/desolate-bond/packages/client/node_modules -name package.json -path */colyseus*)",
       "Bash(find /c/Users/user/Desktop/gitlab/desolate-bond/node_modules -name package.json -path */colyseus*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git rm:*)",
+      "Bash(rm -rf /c/Users/user/Desktop/gitlab/desolate-bond/packages/client/.git)",
+      "Bash(git commit -m \"feat: implement core foundation \\(tasks 1.1–4.5\\):*)",
+      "Read(//c/Users/user/.claude/skills/**)",
+      "Read(//c/Users/user/.claude/**)",
+      "Bash(find ~/.claude -name *.md)",
+      "Bash(mkdir -p \"/c/Users/user/Desktop/gitlab/desolate-bond/.claude/skills/commit\")",
+      "Bash(mkdir -p \"/c/Users/user/Desktop/gitlab/desolate-bond/.claude/skills/push\")"
     ]
   }
 }
