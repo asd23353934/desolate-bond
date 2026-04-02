@@ -1,34 +1,34 @@
 ## 1. 專案初始化與架構設定
 
-- [ ] 1.1 建立前端專案（Vite + React + TypeScript），安裝 Phaser 3、Tailwind CSS、shadcn/ui、qrcode
-- [ ] 1.2 建立後端專案（Node.js + TypeScript），安裝 Colyseus、pg（Neon PostgreSQL 驅動）
-- [ ] 1.3 設定前後端 monorepo 結構（packages/client、packages/server），依整潔架構（Clean Architecture）建立目錄：domain/、application/、infrastructure/、presentation/
-- [ ] 1.4 設定 Cloudflare Pages 部署前端、Railway 部署後端的 CI/CD 流程
-- [ ] 1.5 建立 Neon 資料庫並設定連線字串；依前端框架：Phaser 3 + React 分層架構與後端框架：Colyseus（Node.js）建立初始目錄結構
-- [ ] 1.6 定義 Domain 層介面（IPlayerRepository、IRoomRepository、IGameSession）確保 Infrastructure 對 Domain 的依賴反轉（DI）；驗證 domain 層不 import 任何 Phaser/Colyseus 模組
+- [x] 1.1 建立前端專案（Vite + React + TypeScript），安裝 Phaser 3、Tailwind CSS、shadcn/ui、qrcode
+- [x] 1.2 建立後端專案（Node.js + TypeScript），安裝 Colyseus、pg（Neon PostgreSQL 驅動）
+- [x] 1.3 設定前後端 monorepo 結構（packages/client、packages/server），依整潔架構（Clean Architecture）建立目錄：domain/、application/、infrastructure/、presentation/
+- [x] 1.4 設定 Cloudflare Pages 部署前端、Railway 部署後端的 CI/CD 流程
+- [x] 1.5 建立 Neon 資料庫並設定連線字串；依前端框架：Phaser 3 + React 分層架構與後端框架：Colyseus（Node.js）建立初始目錄結構
+- [x] 1.6 定義 Domain 層介面（IPlayerRepository、IRoomRepository、IGameSession）確保 Infrastructure 對 Domain 的依賴反轉（DI）；驗證 domain 層不 import 任何 Phaser/Colyseus 模組
 
 ## 2. 資料庫 Schema
 
-- [ ] 2.1 建立 users 資料表（id, username, password_hash, is_guest, created_at）
-- [ ] 2.2 建立 game_sessions 資料表（id, room_id, started_at, ended_at, boss_count, player_count）
-- [ ] 2.3 建立 player_results 資料表（id, session_id, user_id, class, total_damage, survival_time, cleared, clear_time）並建立排行榜查詢所需索引
+- [x] 2.1 建立 users 資料表（id, username, password_hash, is_guest, created_at）
+- [x] 2.2 建立 game_sessions 資料表（id, room_id, started_at, ended_at, boss_count, player_count）
+- [x] 2.3 建立 player_results 資料表（id, session_id, user_id, class, total_damage, survival_time, cleared, clear_time）並建立排行榜查詢所需索引
 
 ## 3. 帳號系統（player-auth）
 
-- [ ] 3.1 實作 Player can register a lightweight account API（POST /auth/register），username + password，不需 Email，重複 username 回傳錯誤
-- [ ] 3.2 實作 Registered player can log in API（POST /auth/login），驗證後回傳 JWT session token，錯誤時回傳通用錯誤訊息
-- [ ] 3.3 實作 Player can play as a guest without registration：只需 display name，建立臨時 session，不寫入 users 表，關閉瀏覽器後不保留
-- [ ] 3.4 實作 Guest can appear on the leaderboard：訪客結果提交至排行榜時附加 guest indicator 標記
-- [ ] 3.5 建立登入/註冊/訪客選擇 UI 頁面（React + shadcn/ui）
+- [x] 3.1 實作 Player can register a lightweight account API（POST /auth/register），username + password，不需 Email，重複 username 回傳錯誤
+- [x] 3.2 實作 Registered player can log in API（POST /auth/login），驗證後回傳 JWT session token，錯誤時回傳通用錯誤訊息
+- [x] 3.3 實作 Player can play as a guest without registration：只需 display name，建立臨時 session，不寫入 users 表，關閉瀏覽器後不保留
+- [x] 3.4 實作 Guest can appear on the leaderboard：訪客結果提交至排行榜時附加 guest indicator 標記
+- [x] 3.5 建立登入/註冊/訪客選擇 UI 頁面（React + shadcn/ui）
 
 ## 4. 房間管理系統（room-management）
 
-- [ ] 4.1 實作 Host can create a room with a unique code：建立房間時產生唯一 6 碼英數房間碼，顯示給 Host
-- [ ] 4.1a 實作 QR Code 進房機制（QR Code is displayed in waiting lobby）：客戶端用 `qrcode` 生成指向 `<origin>/?room=<code>` 的 QR Code 圖片，顯示於等待大廳；掃描後自動帶入房間碼觸發加入流程
-- [ ] 4.2 實作 Player can join a room by entering a room code：驗證房間碼有效性、狀態為 LOBBY、人數未滿 4 人，無效時顯示錯誤；支援 URL query parameter `?room=<code>` 自動帶入
-- [ ] 4.3 實作 Host can add Bot players to fill empty slots：Host 可新增/移除 Bot（最多 3 個 Bot，至少 1 個真人）
-- [ ] 4.4 實作 Players select their class in the waiting lobby：職業選擇即時同步給所有大廳成員
-- [ ] 4.5 實作 Host can start the game when all players are ready：所有真人玩家選好職業後 Host 才可按開始，否則顯示哪位玩家未選
+- [x] 4.1 實作 Host can create a room with a unique code：建立房間時產生唯一 6 碼英數房間碼，顯示給 Host
+- [x] 4.1a 實作 QR Code 進房機制（QR Code is displayed in waiting lobby）：客戶端用 `qrcode` 生成指向 `<origin>/?room=<code>` 的 QR Code 圖片，顯示於等待大廳；掃描後自動帶入房間碼觸發加入流程
+- [x] 4.2 實作 Player can join a room by entering a room code：驗證房間碼有效性、狀態為 LOBBY、人數未滿 4 人，無效時顯示錯誤；支援 URL query parameter `?room=<code>` 自動帶入
+- [x] 4.3 實作 Host can add Bot players to fill empty slots：Host 可新增/移除 Bot（最多 3 個 Bot，至少 1 個真人）
+- [x] 4.4 實作 Players select their class in the waiting lobby：職業選擇即時同步給所有大廳成員
+- [x] 4.5 實作 Host can start the game when all players are ready：所有真人玩家選好職業後 Host 才可按開始，否則顯示哪位玩家未選
 - [ ] 4.6 開始後所有客戶端轉換至 SURVIVAL_PHASE
 
 ## 5. 遊戲 Session 狀態機（game-session）

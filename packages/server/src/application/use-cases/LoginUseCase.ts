@@ -1,0 +1,31 @@
+import { compare } from 'bcryptjs';
+import { sign } from 'jsonwebtoken';
+import type { IPlayerRepository } from '../../domain/interfaces/IPlayerRepository.js';
+
+export interface LoginResult {
+  token: string;
+  id: string;
+  username: string;
+}
+
+export class LoginUseCase {
+  constructor(private readonly players: IPlayerRepository) {}
+
+  async execute(username: string, password: string): Promise<LoginResult> {
+    const user = await this.players.findByUsername(username);
+
+    // Always compare to prevent timing attacks; use a dummy hash on miss
+    const hash = user?.passwordHash ?? '$2a$10$invalidhashfortimingprotection000000000000000000000000';
+    const valid = await compare(password, hash);
+
+    if (!user || !valid) {
+      throw new Error('INVALID_CREDENTIALS');
+    }
+
+    const secret = process.env['JWT_SECRET'];
+    if (!secret) throw new Error('JWT_SECRET not configured');
+
+    const token = sign({ sub: user.id, username: user.username }, secret, { expiresIn: '7d' });
+    return { token, id: user.id, username: user.username };
+  }
+}

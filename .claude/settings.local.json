@@ -13,7 +13,25 @@
       "Bash(find C:/Users/user/Desktop/gitlab/desolate-bond/.spectra -name *.md)",
       "Bash(spectra unpark:*)",
       "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); findings=[f for f in data[''''findings''''] if f[''''severity''''] in \\(''''Critical'''',''''Warning''''\\)]; print\\(f''''{len\\(findings\\)} Warning/Critical''''\\); [print\\(f[''''id''''], f[''''summary'''']\\) for f in findings]\")",
-      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); findings=[f for f in data[''''findings''''] if f[''''severity''''] in \\(''''Critical'''',''''Warning''''\\)]; print\\(f''''{len\\(findings\\)} Warning/Critical remaining''''\\)\")"
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); findings=[f for f in data[''''findings''''] if f[''''severity''''] in \\(''''Critical'''',''''Warning''''\\)]; print\\(f''''{len\\(findings\\)} Warning/Critical remaining''''\\)\")",
+      "Bash(spectra in-progress:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(npx shadcn@latest init --defaults)",
+      "Bash(npm run:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(mkdir -p /c/Users/user/Desktop/gitlab/desolate-bond/packages/server)",
+      "Bash(npm init:*)",
+      "Bash(node -e \":*)",
+      "Bash(cat /c/Users/user/Desktop/gitlab/desolate-bond/openspec/changes/desolate-bond-core/specs/game-session/*.md)",
+      "Bash(cat /c/Users/user/Desktop/gitlab/desolate-bond/openspec/changes/desolate-bond-core/specs/player-auth/*.md)",
+      "Bash(cat /c/Users/user/Desktop/gitlab/desolate-bond/openspec/changes/desolate-bond-core/specs/room-management/*.md)",
+      "Bash(cat /c/Users/user/Desktop/gitlab/desolate-bond/openspec/changes/desolate-bond-core/specs/stats-leaderboard/*.md)",
+      "Bash(npx shadcn@latest add input card label tabs)",
+      "Bash(find /c/Users/user/Desktop/gitlab/desolate-bond/packages/client/node_modules -name package.json -path */colyseus*)",
+      "Bash(find /c/Users/user/Desktop/gitlab/desolate-bond/node_modules -name package.json -path */colyseus*)",
+      "Bash(git add:*)"
     ]
   }
 }

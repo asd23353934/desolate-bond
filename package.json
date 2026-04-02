@@ -1,0 +1,13 @@
+{
+  "name": "desolate-bond",
+  "private": true,
+  "workspaces": [
+    "packages/client",
+    "packages/server"
+  ],
+  "scripts": {
+    "dev:client": "npm run dev --workspace=packages/client",
+    "dev:server": "npm run dev --workspace=packages/server",
+    "build": "npm run build --workspaces"
+  }
+}

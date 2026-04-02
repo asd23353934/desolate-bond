@@ -1,0 +1,29 @@
+name: Deploy Client (Cloudflare Pages)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/client/**'
+      - '.github/workflows/deploy-client.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci --workspace=packages/client
+
+      - run: npm run build --workspace=packages/client
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy packages/client/dist --project-name=desolate-bond
