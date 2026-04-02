@@ -40,7 +40,8 @@
       "Bash(find ~/.claude -name *.md)",
       "Bash(mkdir -p \"/c/Users/user/Desktop/gitlab/desolate-bond/.claude/skills/commit\")",
       "Bash(mkdir -p \"/c/Users/user/Desktop/gitlab/desolate-bond/.claude/skills/push\")",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

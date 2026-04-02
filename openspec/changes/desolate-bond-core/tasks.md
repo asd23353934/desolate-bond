@@ -33,37 +33,37 @@
 
 ## 5. 遊戲 Session 狀態機（game-session）
 
-- [ ] 5.1 實作遊戲狀態機（A game session progresses through defined states）：LOBBY → SURVIVAL_PHASE → PRE_BOSS_SELECTION → BOSS_BATTLE → POST_BOSS_SELECTION → (下一關 or GAME_OVER) → RESULT，狀態轉換只由伺服器觸發
-- [ ] 5.2 實作 A complete run consists of exactly 3 rounds：回合計數器，第 3 回合 Boss 結束後進入 RESULT 而非新回合
-- [ ] 5.3 實作 All players downed simultaneously triggers game over：所有玩家同時進入 DOWNED 時伺服器在 1 tick 內轉換至 GAME_OVER
-- [ ] 5.4 實作 Session result is recorded on completion：RESULT 狀態時每位玩家寫入一筆 player_results，成功失敗皆記錄
+- [x] 5.1 實作遊戲狀態機（A game session progresses through defined states）：LOBBY → SURVIVAL_PHASE → PRE_BOSS_SELECTION → BOSS_BATTLE → POST_BOSS_SELECTION → (下一關 or GAME_OVER) → RESULT，狀態轉換只由伺服器觸發
+- [x] 5.2 實作 A complete run consists of exactly 3 rounds：回合計數器，第 3 回合 Boss 結束後進入 RESULT 而非新回合
+- [x] 5.3 實作 All players downed simultaneously triggers game over：所有玩家同時進入 DOWNED 時伺服器在 1 tick 內轉換至 GAME_OVER
+- [x] 5.4 實作 Session result is recorded on completion：RESULT 狀態時每位玩家寫入一筆 player_results，成功失敗皆記錄
 
 ## 6. 多人同步架構（multiplayer-sync）
 
-- [ ] 6.1 實作同步架構：Server-Authoritative + 客戶端插值；Server is the authoritative source of all game state，客戶端只送 PlayerInput 指令
-- [ ] 6.2 實作 Server broadcasts game state to all clients on each tick：Colyseus Schema 每 60ms 廣播 delta 給所有客戶端
-- [ ] 6.3 實作 Clients interpolate remote player positions for smooth rendering：客戶端對遠端玩家做線性插值（Lerp）平滑渲染
-- [ ] 6.4 實作 Disconnected players are replaced by a Bot：玩家斷線後 3 秒內 Bot 繼承其完整狀態（位置、HP、技能、裝備）
-- [ ] 6.5 實作難度線性縮放公式（Difficulty scales linearly with active player count）：每次進入 Boss 戰前依當前玩家數重新計算 HP 與傷害，公式 HP = base × (1 + (count−1) × 0.6)
-- [ ] 6.6 設計 WebSocket 傳輸效率（Token 節省）：靜態資料（技能定義、地圖）不放入 Colyseus Schema 改為客戶端本地查表；position 欄位使用 float32；裝備/技能列表用 ArraySchema；Boss 投射物用獨立輕量 Schema
+- [x] 6.1 實作同步架構：Server-Authoritative + 客戶端插值；Server is the authoritative source of all game state，客戶端只送 PlayerInput 指令
+- [x] 6.2 實作 Server broadcasts game state to all clients on each tick：Colyseus Schema 每 60ms 廣播 delta 給所有客戶端
+- [x] 6.3 實作 Clients interpolate remote player positions for smooth rendering：客戶端對遠端玩家做線性插值（Lerp）平滑渲染
+- [x] 6.4 實作 Disconnected players are replaced by a Bot：玩家斷線後 3 秒內 Bot 繼承其完整狀態（位置、HP、技能、裝備）
+- [x] 6.5 實作難度線性縮放公式（Difficulty scales linearly with active player count）：每次進入 Boss 戰前依當前玩家數重新計算 HP 與傷害，公式 HP = base × (1 + (count−1) × 0.6)
+- [x] 6.6 設計 WebSocket 傳輸效率（Token 節省）：靜態資料（技能定義、地圖）不放入 Colyseus Schema 改為客戶端本地查表；position 欄位使用 float32；裝備/技能列表用 ArraySchema；Boss 投射物用獨立輕量 Schema
 
 ## 7. 強化期玩法（survival-phase）
 
-- [ ] 7.1 實作 Phaser 3 場景：載入 Kenney Tileset 固定地圖，設定碰撞層，Players move freely on the fixed map
-- [ ] 7.2 實作 WASD 移動輸入：客戶端送出 PlayerInput，伺服器更新位置並廣播
-- [ ] 7.3 實作 Players attack automatically targeting the nearest enemy：伺服器每 tick 計算最近目標應用傷害，客戶端播放特效
-- [ ] 7.4 實作 Players gain experience from killing enemies and level up：擊殺給予經驗，累積達門檻觸發 level up，遊戲不暫停
-- [ ] 7.5 實作技能選擇 UI（遊戲不暫停）：level up 時彈出 3 個選項，Skill selection UI presents 3 options on level up，最多 6 個技能
-- [ ] 7.6 實作資源點隨機化（Items and resources spawn at randomized positions each run）：每局從預定義節點池隨機選取血包、裝備、強化石生成位置
-- [ ] 7.7 實作 Elite enemies spawn on a fixed interval during survival phase：定時刷新菁英怪，掉落增強獎勵
-- [ ] 7.8 實作 Killing enemies restores a small amount of HP：擊殺後 HP 增加固定值，上限為最大 HP
-- [ ] 7.9 實作 Survival phase runs for a fixed countdown duration：倒數計時器，時間到自動觸發 PRE_BOSS_SELECTION
+- [x] 7.1 實作 Phaser 3 場景：載入 Kenney Tileset 固定地圖，設定碰撞層，Players move freely on the fixed map
+- [x] 7.2 實作 WASD 移動輸入：客戶端送出 PlayerInput，伺服器更新位置並廣播
+- [x] 7.3 實作 Players attack automatically targeting the nearest enemy：伺服器每 tick 計算最近目標應用傷害，客戶端播放特效
+- [x] 7.4 實作 Players gain experience from killing enemies and level up：擊殺給予經驗，累積達門檻觸發 level up，遊戲不暫停
+- [x] 7.5 實作技能選擇 UI（遊戲不暫停）：level up 時彈出 3 個選項，Skill selection UI presents 3 options on level up，最多 6 個技能
+- [x] 7.6 實作資源點隨機化（Items and resources spawn at randomized positions each run）：每局從預定義節點池隨機選取血包、裝備、強化石生成位置
+- [x] 7.7 實作 Elite enemies spawn on a fixed interval during survival phase：定時刷新菁英怪，掉落增強獎勵
+- [x] 7.8 實作 Killing enemies restores a small amount of HP：擊殺後 HP 增加固定值，上限為最大 HP
+- [x] 7.9 實作 Survival phase runs for a fixed countdown duration：倒數計時器，時間到自動觸發 PRE_BOSS_SELECTION
 
 ## 8. 職業系統（class-system）
 
-- [ ] 8.1 定義 Three distinct classes are available with different base stats：坦克（高 HP）、輸出（高攻擊）、輔助（均衡+治療加成）基礎數值
-- [ ] 8.2 實作 Each class has a dedicated skill pool 與 A shared common skill pool is accessible by all classes：職業專屬池 + 共通池資料結構
-- [ ] 8.3 實作 level up 技能抽選邏輯：從職業池 + 共通池組合抽出 3 個選項
+- [x] 8.1 定義 Three distinct classes are available with different base stats：坦克（高 HP）、輸出（高攻擊）、輔助（均衡+治療加成）基礎數值
+- [x] 8.2 實作 Each class has a dedicated skill pool 與 A shared common skill pool is accessible by all classes：職業專屬池 + 共通池資料結構
+- [x] 8.3 實作 level up 技能抽選邏輯：從職業池 + 共通池組合抽出 3 個選項
 - [ ] 8.4 實作 Cooperative skills enable class interactions：輔助協作技能可觸發對附近隊友（含 Bot）的效果
 - [ ] 8.5 實作 Class is locked for the entire run after game start：遊戲開始後拒絕任何職業更換請求
 
