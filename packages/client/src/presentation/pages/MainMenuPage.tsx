@@ -6,6 +6,7 @@ import type { AuthUser } from '@/application/useAuth';
 import { useRoom } from '@/application/useRoom';
 import { useRoomCodeFromURL } from '@/application/useRoomCodeFromURL';
 import { LobbyPage } from './LobbyPage';
+import { GamePage } from './GamePage';
 
 interface MainMenuPageProps {
   user: AuthUser;
@@ -16,6 +17,7 @@ export function MainMenuPage({ user, onLogout }: MainMenuPageProps) {
   const { room, roomCode, error, loading, createRoom, joinRoom, leaveRoom } = useRoom(user);
   const codeFromURL = useRoomCodeFromURL();
   const [inputCode, setInputCode] = useState(codeFromURL);
+  const [inGame, setInGame] = useState(false);
 
   // Auto-join if URL has ?room=
   useEffect(() => {
@@ -23,8 +25,12 @@ export function MainMenuPage({ user, onLogout }: MainMenuPageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (room && inGame) {
+    return <GamePage room={room} user={user} onLeave={() => { setInGame(false); leaveRoom(); }} />;
+  }
+
   if (room) {
-    return <LobbyPage room={room} roomCode={roomCode} user={user} onLeave={leaveRoom} />;
+    return <LobbyPage room={room} roomCode={roomCode} user={user} onLeave={leaveRoom} onGameStart={() => setInGame(true)} />;
   }
 
   return (

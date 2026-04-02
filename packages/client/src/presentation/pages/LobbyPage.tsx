@@ -10,6 +10,7 @@ interface LobbyPageProps {
   roomCode: string;
   user: AuthUser;
   onLeave: () => void;
+  onGameStart: () => void;
 }
 
 const CLASS_LABELS: Record<string, string> = {
@@ -20,7 +21,7 @@ const CLASS_LABELS: Record<string, string> = {
 
 const CLASSES = ['TANK', 'DAMAGE', 'SUPPORT'] as const;
 
-export function LobbyPage({ room, roomCode, user, onLeave }: LobbyPageProps) {
+export function LobbyPage({ room, roomCode, user, onLeave, onGameStart }: LobbyPageProps) {
   const lobby = useLobbyState(room);
   const me = lobby.players.find((p) => p.id === user.id);
   const isHost = me?.isHost ?? false;
@@ -31,6 +32,12 @@ export function LobbyPage({ room, roomCode, user, onLeave }: LobbyPageProps) {
       setStartError(msg.notReady);
     });
   }, [room]);
+
+  useEffect(() => {
+    if (lobby.gameState === 'SURVIVAL_PHASE') {
+      onGameStart();
+    }
+  }, [lobby.gameState, onGameStart]);
 
   function selectClass(playerClass: string) {
     room.send('SELECT_CLASS', { playerClass });

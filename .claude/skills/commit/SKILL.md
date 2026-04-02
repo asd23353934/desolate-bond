@@ -15,28 +15,28 @@ Create a well-structured git commit from the current working changes.
 
 3. **Analyze the diff** — run `git diff --cached --stat` and `git diff --cached` (limit to ~200 lines if very large) to understand *what* changed and *why*.
 
-4. **Write the commit message** using Conventional Commits format:
+4. **Write the commit message** using Conventional Commits format with **繁體中文**：
 
    ```
-   <type>(<scope>): <short summary in imperative mood>
+   <type>(<scope>): <中文簡短摘要>
 
-   <optional body: what changed and why, wrap at 72 chars>
+   <選用 body：說明改了什麼、為什麼，每行不超過 72 字元>
    ```
 
    **Types:** `feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `style`, `perf`, `ci`
 
-   **Scope:** the area affected (e.g., `auth`, `lobby`, `server`, `client`, `db`)
+   **Scope:** 受影響的範圍（如 `auth`, `lobby`, `server`, `client`, `db`）
 
-   **Summary rules:**
-   - Imperative mood: "add feature" not "added feature"
-   - No period at end
-   - Under 72 characters
-   - Be specific: "implement JWT login API" not "update code"
+   **摘要規則：**
+   - 祈使句動詞開頭：「新增」「修正」「重構」，不要「新增了」「已修正」
+   - 不加句號
+   - 繁體中文，72 字元以內
+   - 要具體：「新增 JWT 登入 API」而非「更新程式碼」
 
-   **Body (include when):**
-   - Multiple unrelated changes exist
-   - The *why* is non-obvious
-   - Breaking changes (add `BREAKING CHANGE:` footer)
+   **加 body 的時機：**
+   - 多個不相關的變更
+   - 原因不明顯
+   - 有 breaking change（加 `BREAKING CHANGE:` footer）
 
 5. **Commit** — run `git commit -m "<message>"` (use `-m` twice if body is needed: `git commit -m "<subject>" -m "<body>"`).
 
@@ -44,12 +44,12 @@ Create a well-structured git commit from the current working changes.
 
 ## Examples
 
-| Changes | Message |
-|---------|---------|
-| Added POST /auth/register endpoint | `feat(auth): implement user registration API` |
-| Fixed bug where bot count exceeded 3 | `fix(lobby): cap bot count at 3 per room` |
-| Refactored PlayerRepository to use transactions | `refactor(db): use transactions in PlayerRepository` |
-| Multiple unrelated changes across auth + lobby | Use body to describe each area |
+| 變更內容 | 訊息 |
+|---------|------|
+| 新增 POST /auth/register | `feat(auth): 新增使用者註冊 API` |
+| 修正 bot 數量超過 3 的 bug | `fix(lobby): 修正 Bot 數量上限未正確限制為 3` |
+| 重構 PlayerRepository | `refactor(db): 改用 transaction 重構 PlayerRepository` |
+| 多處修改 | 用 body 分別說明各範圍 |
 
 ## Notes
 

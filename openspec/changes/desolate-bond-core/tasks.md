@@ -29,7 +29,7 @@
 - [x] 4.3 實作 Host can add Bot players to fill empty slots：Host 可新增/移除 Bot（最多 3 個 Bot，至少 1 個真人）
 - [x] 4.4 實作 Players select their class in the waiting lobby：職業選擇即時同步給所有大廳成員
 - [x] 4.5 實作 Host can start the game when all players are ready：所有真人玩家選好職業後 Host 才可按開始，否則顯示哪位玩家未選
-- [ ] 4.6 開始後所有客戶端轉換至 SURVIVAL_PHASE
+- [x] 4.6 開始後所有客戶端轉換至 SURVIVAL_PHASE
 
 ## 5. 遊戲 Session 狀態機（game-session）
 
