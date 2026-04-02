@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(spectra new:*)",
+      "Bash(spectra instructions:*)",
+      "Bash(spectra status:*)",
+      "Bash(spectra analyze:*)",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f[''''id''''], f[''''severity''''], f[''''summary'''']\\) for f in data[''''findings'''']]\")",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); findings=[f for f in data[''''findings''''] if f[''''severity''''] in \\(''''Critical'''',''''Warning''''\\)]; print\\(f''''{len\\(findings\\)} Warning/Critical remaining''''\\); [print\\(f[''''id''''], f[''''summary'''']\\) for f in findings]\")",
+      "Bash(spectra validate:*)",
+      "Bash(spectra park:*)",
+      "Bash(spectra list:*)",
+      "Bash(find C:/Users/user/Desktop/gitlab/desolate-bond/.spectra -name *.md)",
+      "Bash(spectra unpark:*)",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); findings=[f for f in data[''''findings''''] if f[''''severity''''] in \\(''''Critical'''',''''Warning''''\\)]; print\\(f''''{len\\(findings\\)} Warning/Critical''''\\); [print\\(f[''''id''''], f[''''summary'''']\\) for f in findings]\")",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); findings=[f for f in data[''''findings''''] if f[''''severity''''] in \\(''''Critical'''',''''Warning''''\\)]; print\\(f''''{len\\(findings\\)} Warning/Critical remaining''''\\)\")"
+    ]
+  }
+}
