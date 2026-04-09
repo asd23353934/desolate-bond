@@ -20,8 +20,10 @@ export class PlayerSchema extends Schema {
   @type('int32')   maxHp: number = 0;
   @type('int32')   xp: number = 0;
   @type('int32')   level: number = 1;
-  // Skill and equipment IDs only — clients resolve display/stats from local tables (6.6)
-  @type(['string']) skillIds = new ArraySchema<string>();
+  // Skill IDs + parallel level array (each skill can be leveled 1–3)
+  @type(['string']) skillIds    = new ArraySchema<string>();
+  @type(['int32'])  skillLevels = new ArraySchema<number>();
+  @type('int32')    shieldHp: number = 0;  // absorbed before real HP (SHIELD skill)
   // 12.4: downed player spectating — '' = not spectating, otherwise id of followed player
   @type('string')   spectatingId: string = '';
   // 13.1: per-run stats — accumulated during the session
@@ -30,9 +32,13 @@ export class PlayerSchema extends Schema {
   @type('int32')    killCount: number = 0;
   @type('int32')    downCount: number = 0;
   @type('int32')    rescueCount: number = 0;
-  // Equipment: 1 weapon slot + up to 4 passive slots (spec 9.1)
-  @type('string')   weaponId: string = '';    // '' = no weapon; value is an EquipmentDef id
-  @type('int32')    weaponLevel: number = 0;  // upgrade level (0 = base stats)
+  // Equipment: up to 3 weapon slots (equal status) + up to 4 passive slots
+  @type('string')   weaponId: string = '';    // weapon slot 1 ('' = empty)
+  @type('int32')    weaponLevel: number = 0;  // weapon slot 1 upgrade level
+  @type('string')   weapon2Id: string = '';   // weapon slot 2 ('' = empty)
+  @type('int32')    weapon2Level: number = 0; // weapon slot 2 upgrade level
+  @type('string')   weapon3Id: string = '';   // weapon slot 3 ('' = empty)
+  @type('int32')    weapon3Level: number = 0; // weapon slot 3 upgrade level
   @type(['string']) passiveIds    = new ArraySchema<string>();  // max 4 passive def ids
   @type(['int32'])  passiveLevels = new ArraySchema<number>();  // parallel array: level per passive slot
 }
@@ -68,12 +74,13 @@ export class BossSchema extends Schema {
 /** Lightweight projectile — kept separate from PlayerSchema to avoid polluting player delta (6.6). */
 export class ProjectileSchema extends Schema {
   @type('string')  id: string = '';
+  @type('string')  ownerId: string = '';  // '' = enemy/boss; sessionId = player projectile (WAND)
   @type('float32') x: number = 0;
   @type('float32') y: number = 0;
   @type('float32') angle: number = 0;  // radians
   @type('float32') vx: number = 0;     // velocity x (px/s); 0 = boss/non-moving projectile
   @type('float32') vy: number = 0;     // velocity y (px/s)
-  @type('int16')   damage: number = 0; // damage on player collision; 0 = handled externally
+  @type('int16')   damage: number = 0; // damage on collision
 }
 
 export class LobbyState extends Schema {

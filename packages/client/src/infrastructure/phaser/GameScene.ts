@@ -40,6 +40,8 @@ const COLOR_FLOOR         = 0x2a4a2a;
 const COLOR_WALL          = 0x555555;
 const COLOR_BOSS          = 0xaa0000;
 
+const BOSS_NAMES: Record<string, string> = { GOLEM: '石像魔', WRAITH: '幽靈將軍', DRAGON: '龍王' };
+
 const WORLD_WIDTH     = 1600;
 const WORLD_HEIGHT    = 1200;
 const SCREEN_WIDTH    = 800;   // Phaser canvas width (viewport)
@@ -80,6 +82,9 @@ export class GameScene extends Phaser.Scene {
   private bgmBoss?: Phaser.Sound.BaseSound;
   private currentBgm?: Phaser.Sound.BaseSound;
 
+  // Pre-boss selection countdown
+  private preBossExpiresAt = 0;
+
   // Downed / spectator state
   private localIsDown = false;
   private rescueFlash?: Phaser.GameObjects.Arc;
@@ -96,6 +101,14 @@ export class GameScene extends Phaser.Scene {
 
   // Rescue progress bars displayed above downed players' heads (targetId → bar graphics)
   private rescueBars = new Map<string, { bg: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle }>();
+
+  // Name / HP labels above sprites
+  private playerNameLabels = new Map<string, Phaser.GameObjects.Text>();
+  private playerHpLabels   = new Map<string, Phaser.GameObjects.Text>();
+  private enemyNameLabels  = new Map<string, Phaser.GameObjects.Text>();
+  private enemyHpLabels    = new Map<string, Phaser.GameObjects.Text>();
+  private bossNameLabel?: Phaser.GameObjects.Text;
+  private bossHpLabel?: Phaser.GameObjects.Text;
 
   // Guard flag: Colyseus state callbacks survive scene destruction; skip Phaser work when false
   private sceneAlive = true;
@@ -257,10 +270,10 @@ export class GameScene extends Phaser.Scene {
     const style = { fontSize: '13px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 };
     // HP display
     this.hudHpText    = this.add.text(10, 8, 'HP: —', style).setDepth(HUD_DEPTH).setScrollFactor(0);
-    // Round display
+    // Round display (center top)
     this.hudRoundText = this.add.text(SCREEN_WIDTH / 2, 8, '', style).setOrigin(0.5, 0).setDepth(HUD_DEPTH).setScrollFactor(0);
-    // Countdown timer
-    this.hudTimerText = this.add.text(SCREEN_WIDTH - 10, 8, '', { ...style, align: 'right' }).setOrigin(1, 0).setDepth(HUD_DEPTH).setScrollFactor(0);
+    // Countdown timer — placed directly below the round text
+    this.hudTimerText = this.add.text(SCREEN_WIDTH / 2, 28, '', { ...style, fontSize: '11px', color: '#ffdd88', align: 'center' }).setOrigin(0.5, 0).setDepth(HUD_DEPTH).setScrollFactor(0);
 
     // Level display (bottom-left)
     this.hudLevelText = this.add.text(10, SCREEN_HEIGHT - 36, 'Lv.1', style).setDepth(HUD_DEPTH).setScrollFactor(0);
@@ -291,12 +304,23 @@ export class GameScene extends Phaser.Scene {
       const isLocal = sessionId === this.localSessionId;
       const sprite  = this.createPlayerSprite(player, isLocal);
 
+      // Name / HP labels above player sprite
+      const labelStyle = { fontSize: '10px', color: '#ffffff', stroke: '#000000', strokeThickness: 2 };
+      const nameLabel = this.add.text(player.x, player.y - 22, player.displayName ?? sessionId, labelStyle).setOrigin(0.5, 1).setDepth(3);
+      const hpLabel   = this.add.text(player.x, player.y - 10, this.hpText(player), { ...labelStyle, color: isLocal ? '#88ff88' : '#ffbb88' }).setOrigin(0.5, 1).setDepth(3);
+      this.playerNameLabels.set(sessionId, nameLabel);
+      this.playerHpLabels.set(sessionId, hpLabel);
+
       if (isLocal) {
         this.localSprite = sprite;
         this.cameras.main.startFollow(sprite, true, 0.1, 0.1);
         $(player).onChange(() => {
           if (!this.sceneAlive) return;
           this.localSprite?.setPosition(player.x, player.y);
+          this.playerNameLabels.get(sessionId)?.setPosition(player.x, player.y - 22);
+          const hpLbl = this.playerHpLabels.get(sessionId);
+          hpLbl?.setPosition(player.x, player.y - 10);
+          hpLbl?.setText(this.hpText(player));
           this.updateHUD(player, state);
 
           // 倒地狀態變化
@@ -324,6 +348,8 @@ export class GameScene extends Phaser.Scene {
         $(player).onChange(() => {
           if (!this.sceneAlive) return;
           this.remoteInterpolators.get(sessionId)?.setTarget(player.x, player.y);
+          // Update HP label text (position updated in update() via interpolator)
+          this.playerHpLabels.get(sessionId)?.setText(this.hpText(player));
           // Show downed state
           const s = this.remoteSprites.get(sessionId);
           if (s) s.setAlpha(player.isDown ? 0.35 : 1.0);
@@ -336,6 +362,10 @@ export class GameScene extends Phaser.Scene {
       this.remoteSprites.delete(sessionId);
       this.remoteInterpolators.delete(sessionId);
       this.clearRescueBar(sessionId);
+      this.playerNameLabels.get(sessionId)?.destroy();
+      this.playerNameLabels.delete(sessionId);
+      this.playerHpLabels.get(sessionId)?.destroy();
+      this.playerHpLabels.delete(sessionId);
       if (sessionId === this.localSessionId) {
         this.localSprite?.destroy();
         this.localSprite = undefined;
@@ -358,21 +388,30 @@ export class GameScene extends Phaser.Scene {
     return this.add.rectangle(player.x, player.y, 24, 24, color).setDepth(2);
   }
 
+  private hpText(player: any): string {
+    const shield = player.shieldHp ?? 0;
+    return `${player.hp ?? '?'}/${player.maxHp ?? '?'}${shield > 0 ? ` [${Math.ceil(shield)}]` : ''}`;
+  }
+
   private updateHUD(localPlayer: any, state: any) {
-    this.hudHpText?.setText(`HP: ${localPlayer.hp}/${localPlayer.maxHp}`);
+    this.hudHpText?.setText(`HP: ${localPlayer.hp}/${localPlayer.maxHp}${(localPlayer.shieldHp ?? 0) > 0 ? ` [🛡${Math.ceil(localPlayer.shieldHp)}]` : ''}`);
     const timeLeft = state.survivalTimeLeft as number;
+    const gameState = state.gameState as string;
     if (timeLeft > 0) {
       const m = Math.floor(timeLeft / 60);
       const s = timeLeft % 60;
-      this.hudTimerText?.setText(`${m}:${String(s).padStart(2, '0')}`);
+      this.hudTimerText?.setText(`Boss 倒數 ${m}:${String(s).padStart(2, '0')}`);
+    } else if (gameState === 'PRE_BOSS_SELECTION' && this.preBossExpiresAt > 0) {
+      const secsLeft = Math.max(0, Math.ceil((this.preBossExpiresAt - Date.now()) / 1000));
+      this.hudTimerText?.setText(secsLeft > 0 ? `選擇技能中… ${secsLeft}秒後自動選擇` : '選擇技能中…');
     } else {
       this.hudTimerText?.setText('');
     }
 
-    // Level & XP
+    // Level & XP — threshold matches server formula: floor(80 * 1.06^(lv-1))
     const lv  = localPlayer.level as number ?? 1;
     const xp  = localPlayer.xp   as number ?? 0;
-    const threshold = lv * 100;
+    const threshold = Math.floor(80 * Math.pow(1.06, lv - 1));
     this.hudLevelText?.setText(`Lv.${lv}`);
     if (this.hudXpBar) {
       const xpBarW = SCREEN_WIDTH - 20;
@@ -394,10 +433,22 @@ export class GameScene extends Phaser.Scene {
       const size   = enemy.type === 'elite' ? 28 : 20;
       const sprite = this.add.rectangle(enemy.x, enemy.y, size, size, color).setDepth(2);
       this.enemySprites.set(id, sprite);
+
+      // Name / HP labels above enemy sprite
+      const enemyTypeName = enemy.type === 'elite' ? '精英怪' : enemy.type === 'ranged' ? '遠程怪' : '雜兵';
+      const eLabelStyle = { fontSize: '9px', color: '#ff9999', stroke: '#000000', strokeThickness: 2 };
+      const eNameLabel = this.add.text(enemy.x, enemy.y - 18, enemyTypeName, eLabelStyle).setOrigin(0.5, 1).setDepth(3);
+      const eHpLabel   = this.add.text(enemy.x, enemy.y - 8,  `${enemy.hp}`, { ...eLabelStyle, color: '#ff5555' }).setOrigin(0.5, 1).setDepth(3);
+      this.enemyNameLabels.set(id, eNameLabel);
+      this.enemyHpLabels.set(id, eHpLabel);
+
       let prevHp = enemy.hp as number;
       $(enemy).onChange(() => {
         if (!this.sceneAlive) return;
         sprite.setPosition(enemy.x, enemy.y);
+        eNameLabel.setPosition(enemy.x, enemy.y - 18);
+        eHpLabel.setPosition(enemy.x, enemy.y - 8);
+        eHpLabel.setText(`${enemy.hp}`);
         // 15.4: attack effect on damage taken
         if (enemy.hp < prevHp) {
           if (this.assetsLoaded && this.anims.exists('fx-attack')) {
@@ -423,6 +474,10 @@ export class GameScene extends Phaser.Scene {
     $(enemies).onRemove((_enemy: unknown, id: string) => {
       this.enemySprites.get(id)?.destroy();
       this.enemySprites.delete(id);
+      this.enemyNameLabels.get(id)?.destroy();
+      this.enemyNameLabels.delete(id);
+      this.enemyHpLabels.get(id)?.destroy();
+      this.enemyHpLabels.delete(id);
     });
   }
 
@@ -493,14 +548,23 @@ export class GameScene extends Phaser.Scene {
         this.bossSprite = undefined;
         this.bossHpBar?.bg.setVisible(false);
         this.bossHpBar?.fill.setVisible(false);
+        this.bossNameLabel?.destroy();
+        this.bossNameLabel = undefined;
+        this.bossHpLabel?.destroy();
+        this.bossHpLabel = undefined;
         return;
       }
       if (!this.bossSprite) {
         this.bossSprite = this.add.rectangle(boss.x, boss.y, 40, 40, COLOR_BOSS).setDepth(2);
         this.bossHpBar?.bg.setVisible(true);
         this.bossHpBar?.fill.setVisible(true);
+        const bossName = BOSS_NAMES[boss.defId as string] ?? 'Boss';
+        this.bossNameLabel = this.add.text(boss.x, boss.y - 30, bossName, { fontSize: '13px', color: '#ff4444', stroke: '#000000', strokeThickness: 3 }).setOrigin(0.5, 1).setDepth(3);
+        this.bossHpLabel   = this.add.text(boss.x, boss.y - 15, `${boss.hp}/${boss.maxHp}`, { fontSize: '11px', color: '#ffbbbb', stroke: '#000000', strokeThickness: 2 }).setOrigin(0.5, 1).setDepth(3);
       }
       this.bossSprite.setPosition(boss.x, boss.y);
+      this.bossNameLabel?.setPosition(boss.x, boss.y - 30);
+      this.bossHpLabel?.setText(`${boss.hp}/${boss.maxHp}`).setPosition(boss.x, boss.y - 15);
       // Update boss HP bar
       const pct = Math.max(0, boss.hp / boss.maxHp);
       const barW = 400;
@@ -545,6 +609,10 @@ export class GameScene extends Phaser.Scene {
       this.playSFX('sfx-hurt');
     });
 
+    // Pre-boss selection countdown — store expiry time to display in HUD
+    this.room.onMessage('PRE_BOSS_WAITING', (msg: { timeLeft: number }) => {
+      if (msg.timeLeft > 0) this.preBossExpiresAt = Date.now() + msg.timeLeft;
+    });
   }
 
   // ----- Minimap -----
@@ -643,9 +711,23 @@ export class GameScene extends Phaser.Scene {
   private spectatingId = '';
 
   update() {
+    // Refresh pre-boss countdown in HUD every frame
+    if (this.preBossExpiresAt > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const gs = (this.room.state as any).gameState as string;
+      if (gs === 'PRE_BOSS_SELECTION') {
+        const secsLeft = Math.max(0, Math.ceil((this.preBossExpiresAt - Date.now()) / 1000));
+        this.hudTimerText?.setText(secsLeft > 0 ? `選擇技能中… ${secsLeft}秒後自動選擇` : '選擇技能中…');
+      } else if (gs !== 'PRE_BOSS_SELECTION') {
+        this.preBossExpiresAt = 0;
+      }
+    }
+
     for (const [sessionId, interpolator] of this.remoteInterpolators) {
       interpolator.update(LERP_ALPHA);
       this.remoteSprites.get(sessionId)?.setPosition(interpolator.x, interpolator.y);
+      this.playerNameLabels.get(sessionId)?.setPosition(interpolator.x, interpolator.y - 22);
+      this.playerHpLabels.get(sessionId)?.setPosition(interpolator.x, interpolator.y - 10);
     }
 
     if (this.localIsDown) {

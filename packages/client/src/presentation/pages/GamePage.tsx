@@ -5,6 +5,7 @@ import type { AuthUser } from '@/application/useAuth';
 import type { GameSettings } from '@/application/useGameSettings';
 import { GameScene } from '@/infrastructure/phaser/GameScene';
 import { SkillSelectionOverlay } from '@/presentation/components/SkillSelectionOverlay';
+import { RewardSelectionOverlay } from '@/presentation/components/RewardSelectionOverlay';
 import { SKILL_DEFS } from '@/domain/skillDefs';
 import { ITEM_DEFS } from '@/domain/itemDefs';
 
@@ -16,12 +17,12 @@ interface GamePageProps {
   onReturnToLobby: () => void;
 }
 
-interface LevelUpState { level: number; options: string[]; isPreBoss?: boolean }
+interface LevelUpState { level: number; options: string[]; isPreBoss?: boolean; ownedLevels?: Record<string, number>; weaponId?: string; weaponLevel?: number; weapon2Id?: string; weapon2Level?: number; weapon3Id?: string; weapon3Level?: number; }
 
 interface LocalPlayerState {
   hp: number; maxHp: number; level: number; xp: number;
-  selectedClass: string; skillIds: string[];
-  weaponId: string; passiveIds: string[];
+  selectedClass: string; skillIds: string[]; skillLevels: number[];
+  weaponId: string; weaponLevel: number; weapon2Id: string; weapon2Level: number; weapon3Id: string; weapon3Level: number; passiveIds: string[];
   isDown: boolean;
 }
 
@@ -49,7 +50,13 @@ function useLocalPlayerState(room: Room): LocalPlayerState | null {
         xp: player.xp ?? 0,
         selectedClass: player.selectedClass ?? '',
         skillIds: player.skillIds?.toArray?.() ?? [...(player.skillIds ?? [])],
+        skillLevels: player.skillLevels?.toArray?.() ?? [...(player.skillLevels ?? [])],
         weaponId: player.weaponId ?? '',
+        weaponLevel: player.weaponLevel ?? 0,
+        weapon2Id: player.weapon2Id ?? '',
+        weapon2Level: player.weapon2Level ?? 0,
+        weapon3Id: player.weapon3Id ?? '',
+        weapon3Level: player.weapon3Level ?? 0,
         passiveIds: player.passiveIds?.toArray?.() ?? [...(player.passiveIds ?? [])],
         isDown: player.isDown ?? false,
       });
@@ -100,8 +107,10 @@ const CLASS_LABEL: Record<string, string> = { TANK: '坦克', DAMAGE: '傷害', 
 export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [levelUp, setLevelUp] = useState<LevelUpState | null>(null);
-  const [showPanel, setShowPanel] = useState(false);
+  const [postBossReward, setPostBossReward] = useState<{ options: string[] } | null>(null);
   const [result, setResult] = useState<SessionResult | null>(null);
+  const [preBossWaiting, setPreBossWaiting] = useState<{ waitingNames: string[]; expiresAt: number } | null>(null);
+  const [preBossTimeLeft, setPreBossTimeLeft] = useState(0);
   const ps = useLocalPlayerState(room);
   const teammates = useTeammatesState(room);
 
@@ -121,11 +130,52 @@ export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageP
   }, [room]);
 
   useEffect(() => {
-    const unsub = room.onMessage('PRE_BOSS_SKILL_OPTIONS', (msg: { options: string[] }) => {
-      setLevelUp({ level: 0, options: msg.options, isPreBoss: true });
+    const unsub = room.onMessage('PRE_BOSS_SKILL_OPTIONS', (msg: { options: string[]; ownedLevels?: Record<string, number>; weaponId?: string; weaponLevel?: number; weapon2Id?: string; weapon2Level?: number; weapon3Id?: string; weapon3Level?: number }) => {
+      setLevelUp({ level: 0, options: msg.options, isPreBoss: true, ownedLevels: msg.ownedLevels, weaponId: msg.weaponId, weaponLevel: msg.weaponLevel, weapon2Id: msg.weapon2Id, weapon2Level: msg.weapon2Level, weapon3Id: msg.weapon3Id, weapon3Level: msg.weapon3Level });
     });
     return () => { unsub(); };
   }, [room]);
+
+  // Boss 前選技能等待狀態
+  useEffect(() => {
+    const unsub = room.onMessage('PRE_BOSS_WAITING', (msg: { waitingNames: string[]; timeLeft: number }) => {
+      setPreBossWaiting(prev => ({
+        waitingNames: msg.waitingNames,
+        expiresAt: msg.timeLeft > 0 ? Date.now() + msg.timeLeft : (prev?.expiresAt ?? Date.now()),
+      }));
+    });
+    return () => { unsub(); };
+  }, [room]);
+
+  useEffect(() => {
+    const unsub = room.onMessage('BOSS_SPAWNED', () => {
+      setPreBossWaiting(null);
+    });
+    return () => { unsub(); };
+  }, [room]);
+
+  // Boss 後獎勵選擇
+  useEffect(() => {
+    const unsub = room.onMessage('POST_BOSS_REWARD_OPTIONS', (msg: { options: string[] }) => {
+      setPostBossReward({ options: msg.options });
+    });
+    return () => { unsub(); };
+  }, [room]);
+
+  // 消除 BOSS_AREA_ATTACK 未註冊警告（視覺效果由 GameScene 自行處理）
+  useEffect(() => {
+    const unsub = room.onMessage('BOSS_AREA_ATTACK', () => {});
+    return () => { unsub(); };
+  }, [room]);
+
+  // 倒數計時器
+  useEffect(() => {
+    if (!preBossWaiting) return;
+    const id = setInterval(() => {
+      setPreBossTimeLeft(Math.max(0, Math.ceil((preBossWaiting.expiresAt - Date.now()) / 1000)));
+    }, 500);
+    return () => clearInterval(id);
+  }, [preBossWaiting]);
 
   function handleSkillSelect(skillId: string) {
     if (levelUp?.isPreBoss) {
@@ -134,6 +184,11 @@ export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageP
       room.send('SELECT_SKILL', { skillId });
     }
     setLevelUp(null);
+  }
+
+  function handleRewardSelect(rewardId: string) {
+    room.send('SELECT_REWARD', { rewardId });
+    setPostBossReward(null);
   }
 
   useEffect(() => {
@@ -178,7 +233,37 @@ export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageP
               options={levelUp.options}
               onSelect={handleSkillSelect}
               isPreBoss={levelUp.isPreBoss}
+              preBossTimeLeft={levelUp.isPreBoss ? preBossTimeLeft : undefined}
+              ownedLevels={levelUp.ownedLevels}
+              weaponId={levelUp.weaponId}
+              weaponLevel={levelUp.weaponLevel}
+              weapon2Id={levelUp.weapon2Id}
+              weapon2Level={levelUp.weapon2Level}
+              weapon3Id={levelUp.weapon3Id}
+              weapon3Level={levelUp.weapon3Level}
             />
+          )}
+
+          {/* Boss 後獎勵選擇 */}
+          {postBossReward && !result && (
+            <RewardSelectionOverlay
+              options={postBossReward.options}
+              ownedWeaponIds={[ps?.weaponId, ps?.weapon2Id, ps?.weapon3Id].filter(Boolean) as string[]}
+              onSelect={handleRewardSelect}
+            />
+          )}
+
+          {/* Boss 前等待：倒數顯示於 Phaser HUD（第X關下方），此處僅顯示仍在選擇的玩家名單 */}
+          {preBossWaiting && preBossWaiting.waitingNames.length > 0 && !levelUp && !result && (
+            <div className="absolute top-12 left-1/2 -translate-x-1/2 pointer-events-none">
+              <div className="bg-black/70 border border-red-600 rounded-lg px-4 py-2 text-center">
+                <div className="flex gap-2 justify-center flex-wrap">
+                  {preBossWaiting.waitingNames.map((name) => (
+                    <span key={name} className="text-xs text-yellow-300">⏳ {name}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
 
           {/* 倒地提示 */}
@@ -257,39 +342,47 @@ export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageP
                 <div className="flex justify-between"><span className="text-gray-400">等級</span><span>Lv.{ps.level}</span></div>
                 <div className="flex justify-between mb-1"><span className="text-gray-400">HP</span><span>{ps.hp}/{ps.maxHp}</span></div>
                 {/* XP bar */}
-                <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-400 rounded-full transition-all"
-                    style={{ width: `${Math.min(100, (ps.xp / (ps.level * 100)) * 100)}%` }}
-                  />
-                </div>
-                <div className="text-gray-500 mt-0.5">{ps.xp}/{ps.level * 100} XP</div>
+                {(() => {
+                  const xpThreshold = Math.floor(80 * Math.pow(1.06, ps.level - 1));
+                  return (
+                    <>
+                      <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-400 rounded-full transition-all"
+                          style={{ width: `${Math.min(100, (ps.xp / xpThreshold) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="text-gray-500 mt-0.5">{ps.xp}/{xpThreshold} XP</div>
+                    </>
+                  );
+                })()}
               </>
             ) : <div className="text-gray-500">載入中…</div>}
           </div>
 
           {/* Skills */}
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-3">
-            <button
-              className="font-bold text-yellow-400 mb-2 flex items-center justify-between w-full"
-              onClick={() => setShowPanel(v => !v)}
-            >
-              <span>技能 {ps ? `(${ps.skillIds.length}/6)` : ''}</span>
-              <span className="text-gray-400">{showPanel ? '▲' : '▼'}</span>
-            </button>
-            {showPanel && ps && (
+            <div className="font-bold text-yellow-400 mb-2">技能 {ps ? `(${ps.skillIds.length}/8)` : ''}</div>
+            {ps ? (
               ps.skillIds.length === 0
                 ? <div className="text-gray-500">尚無技能</div>
-                : ps.skillIds.map(id => {
+                : ps.skillIds.map((id, i) => {
                     const def = SKILL_DEFS[id];
+                    const lv  = ps.skillLevels[i] ?? 1;
                     return def ? (
-                      <div key={id} className="mb-1.5">
-                        <div className="text-yellow-300">{def.name}</div>
-                        <div className="text-gray-400">{def.description}</div>
+                      <div key={id} className="relative group mb-1 cursor-default">
+                        <div className="flex items-center gap-1">
+                          <span className="text-yellow-300">{def.name}</span>
+                          <span className="text-[9px] bg-yellow-800 text-yellow-200 px-1 rounded">Lv.{lv}</span>
+                        </div>
+                        {/* Hover tooltip */}
+                        <div className="absolute left-full ml-1 top-0 hidden group-hover:block bg-gray-800 border border-gray-600 rounded p-2 text-[10px] text-gray-200 w-36 z-20 pointer-events-none shadow-lg">
+                          {def.levelDesc?.[lv] ?? def.description}
+                        </div>
                       </div>
                     ) : null;
                   })
-            )}
+            ) : <div className="text-gray-500">載入中…</div>}
           </div>
 
           {/* Equipment */}
@@ -297,17 +390,42 @@ export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageP
             <div className="font-bold text-yellow-400 mb-2">裝備</div>
             {ps ? (
               <>
-                <div className="mb-1">
-                  <span className="text-gray-400">武器：</span>
-                  <span>{ITEM_DEFS[ps.weaponId]?.name ?? '（無）'}</span>
-                </div>
+                {([
+                  { id: ps.weaponId,  lv: ps.weaponLevel,  label: '槽1' },
+                  { id: ps.weapon2Id, lv: ps.weapon2Level ?? 0, label: '槽2' },
+                  { id: ps.weapon3Id, lv: ps.weapon3Level ?? 0, label: '槽3' },
+                ] as { id: string; lv: number; label: string }[]).map(({ id, lv, label }) => (
+                  <div key={label} className="relative group mb-1 cursor-default">
+                    <div className="flex items-center gap-1">
+                      <span className="text-gray-500 text-[10px]">{label}</span>
+                      <span className="text-gray-400">武器：</span>
+                      <span>{ITEM_DEFS[id]?.name ?? '（空）'}</span>
+                      {id && lv > 0 && (
+                        <span className="text-[9px] bg-orange-800 text-orange-200 px-1 rounded">Lv.{lv}</span>
+                      )}
+                    </div>
+                    {ITEM_DEFS[id] && (
+                      <div className="absolute left-full ml-1 top-0 hidden group-hover:block bg-gray-800 border border-gray-600 rounded p-2 text-[10px] text-gray-200 w-36 z-20 pointer-events-none shadow-lg">
+                        {ITEM_DEFS[id]!.levelDesc?.[lv] ?? ITEM_DEFS[id]!.description}
+                      </div>
+                    )}
+                  </div>
+                ))}
                 {ps.passiveIds.length === 0
                   ? <div className="text-gray-500">無被動</div>
-                  : ps.passiveIds.map((id, i) => (
-                      <div key={i} className="text-gray-300">
-                        {ITEM_DEFS[id]?.name ?? id}
-                      </div>
-                    ))
+                  : ps.passiveIds.map((id, i) => {
+                      const def = ITEM_DEFS[id];
+                      return (
+                        <div key={i} className="relative group mb-0.5 cursor-default">
+                          <div className="text-gray-300">{def?.name ?? id}</div>
+                          {def && (
+                            <div className="absolute left-full ml-1 top-0 hidden group-hover:block bg-gray-800 border border-gray-600 rounded p-2 text-[10px] text-gray-200 w-36 z-20 pointer-events-none shadow-lg">
+                              {def.description}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                 }
               </>
             ) : null}

@@ -26,8 +26,8 @@ export const BOSS_DEFS: Record<string, BossDef> = {
     name: '石像魔',
     baseHp: 800,
     baseDamage: 1.0,
-    moveSpeedPhase1: 55,
-    moveSpeedPhase2: 85,
+    moveSpeedPhase1: 45,
+    moveSpeedPhase2: 70,
     phase1Patterns: [
       { type: 'MELEE', damage: 20, cooldownMs: 1200, range: 55 },
     ],
@@ -41,8 +41,8 @@ export const BOSS_DEFS: Record<string, BossDef> = {
     name: '幽靈將軍',
     baseHp: 600,
     baseDamage: 1.0,
-    moveSpeedPhase1: 80,
-    moveSpeedPhase2: 115,
+    moveSpeedPhase1: 65,
+    moveSpeedPhase2: 95,
     phase1Patterns: [
       { type: 'PROJECTILE', damage: 18, cooldownMs: 900, range: 350, speed: 200 },
     ],
@@ -56,8 +56,8 @@ export const BOSS_DEFS: Record<string, BossDef> = {
     name: '龍王',
     baseHp: 1200,
     baseDamage: 1.0,
-    moveSpeedPhase1: 65,
-    moveSpeedPhase2: 100,
+    moveSpeedPhase1: 53,
+    moveSpeedPhase2: 82,
     phase1Patterns: [
       { type: 'MELEE',      damage: 25, cooldownMs: 1000, range: 70 },
       { type: 'PROJECTILE', damage: 20, cooldownMs: 2200, range: 380, speed: 220 },

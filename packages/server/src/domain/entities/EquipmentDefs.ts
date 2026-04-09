@@ -19,9 +19,9 @@ export interface EquipmentDef {
   modifiers: EquipmentModifiers;  // base modifiers at level 0 (before upgrade scaling)
 }
 
-/** Returns modifiers scaled by upgrade level. Each level adds 50% of the base bonus. */
+/** Returns modifiers scaled by upgrade level. Each level adds 30% of the base bonus. */
 export function scaleModifiers(mods: EquipmentModifiers, level: number): EquipmentModifiers {
-  const scale = 1 + level * 0.5;
+  const scale = 1 + level * 0.3;
   return {
     maxHp:        mods.maxHp        !== undefined ? Math.round(mods.maxHp * scale)          : undefined,
     attackDamage: mods.attackDamage !== undefined ? Math.round(mods.attackDamage * scale)    : undefined,

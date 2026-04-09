@@ -43,8 +43,8 @@ export function LobbyPage({ room, roomCode, user, onLeave, onGameStart }: LobbyP
     room.send('SELECT_CLASS', { playerClass });
   }
 
-  function addBot() {
-    room.send('ADD_BOT', {});
+  function addBot(playerClass: string) {
+    room.send('ADD_BOT', { playerClass });
   }
 
   function removeBot(botId: string) {
@@ -111,11 +111,11 @@ export function LobbyPage({ room, roomCode, user, onLeave, onGameStart }: LobbyP
       )}
 
       <div className="flex gap-3">
-        {isHost && lobby.players.length < 4 && (
-          <Button variant="outline" onClick={addBot} size="sm">
-            + 新增 Bot
+        {isHost && lobby.players.length < 4 && CLASSES.map((cls) => (
+          <Button key={cls} variant="outline" onClick={() => addBot(cls)} size="sm">
+            + {CLASS_LABELS[cls]}Bot
           </Button>
-        )}
+        ))}
         {isHost && (
           <Button onClick={startGame}>開始遊戲</Button>
         )}

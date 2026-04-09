@@ -127,7 +127,15 @@
       "Bash(node -e \"const { execSync } = require\\('child_process'\\); try { const out = execSync\\('./node_modules/.bin/tsc --noEmit', { cwd: 'C:\\\\\\\\\\\\\\\\Users\\\\\\\\\\\\\\\\user\\\\\\\\\\\\\\\\Desktop\\\\\\\\\\\\\\\\gitlab\\\\\\\\\\\\\\\\desolate-bond\\\\\\\\\\\\\\\\packages\\\\\\\\\\\\\\\\server', shell: 'cmd.exe', encoding: 'utf8' }\\); console.log\\('OK'\\); } catch\\(e\\) { console.log\\(e.stdout || e.stderr || e.message\\); }\")",
       "Bash(\"./node_modules/.bin/tsc\" --noEmit)",
       "Bash(echo \"EXIT:$?\")",
-      "Bash(\"./node_modules/.bin/tsc\" -p packages/client/tsconfig.json --noEmit)"
+      "Bash(\"./node_modules/.bin/tsc\" -p packages/client/tsconfig.json --noEmit)",
+      "Bash(npx --yes tsc --noEmit --project packages/server/tsconfig.json)",
+      "Bash(./node_modules/.bin/tsc --noEmit --project packages/server/tsconfig.json)",
+      "Bash(tsc -p \"C:/Users/user/Desktop/gitlab/desolate-bond/packages/server/tsconfig.json\" --noEmit)",
+      "Bash(cmd /c \"npx tsc -p packages/server/tsconfig.json --noEmit 2>&1\")",
+      "Bash(cmd /c \"cd C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond && npx tsc -p packages/server/tsconfig.json --noEmit 2>&1\")",
+      "Bash(cmd /c \"cd /d C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond && npx tsc -p packages/server/tsconfig.json --noEmit && echo SERVER_OK || echo SERVER_FAIL\")",
+      "Bash(cmd /c \"cd /d C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond && npx tsc -p packages/server/tsconfig.json --noEmit > C:\\\\\\\\temp\\\\\\\\ts_out.txt 2>&1 && type C:\\\\\\\\temp\\\\\\\\ts_out.txt\")",
+      "Bash(powershell -Command \"Set-Location 'C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond'; npx tsc -p packages/server/tsconfig.json --noEmit 2>&1\")"
     ]
   }
 }

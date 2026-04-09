@@ -8,8 +8,8 @@ import type { PlayerInput } from '../../domain/entities/PlayerInput.js';
 import { scaleBossStats } from '../../domain/entities/DifficultyScaling.js';
 import type { ScaledBossStats } from '../../domain/entities/DifficultyScaling.js';
 import { CLASS_STATS, DEFAULT_CLASS_STATS } from '../../domain/entities/ClassDefs.js';
-import { ALL_SKILL_IDS, COOPERATIVE_SKILLS } from '../../domain/entities/SkillPools.js';
-import { drawSkillOptions } from '../../domain/entities/SkillDraw.js';
+import { ALL_SKILL_IDS, COOPERATIVE_SKILLS, STAT_BOOST_IDS } from '../../domain/entities/SkillPools.js';
+import { drawSkillOptions, MAX_SKILL_LEVEL, MAX_WEAPON_LEVEL } from '../../domain/entities/SkillDraw.js';
 import {
   EQUIPMENT_DEFS, WEAPON_DEF_IDS, PASSIVE_DEF_IDS, scaleModifiers,
 } from '../../domain/entities/EquipmentDefs.js';
@@ -40,8 +40,16 @@ export class GameRoom extends Room<LobbyState> {
   // 12.3: rescue progress per rescuer; reset if rescuer takes damage
   private rescueProgress = new Map<string, { targetId: string; ms: number }>();
   private survivalTimeLeftMs = 0;
-  // Per-player survival tracking: timestamp of last time they were downed (0 = never downed)
+  private xpTrickleAccum = 0;
   private lastDownedAt = new Map<string, number>();
+  // Level-up queuing: prevents concurrent LEVEL_UP messages overwriting each other
+  private awaitingLevelUpIds = new Set<string>();       // players currently viewing level-up UI
+  private pendingLevelUpCounts = new Map<string, number>(); // extra level-ups queued behind current
+  private pendingPreBossOfferIds = new Set<string>();   // players whose pre-boss offer waits until level-ups done
+  private preBossSelectionStartedAt = 0;
+  // Weapon pattern helpers
+  private playerProjectileIds = new Set<string>();         // projectiles fired by players (WAND)
+  private prevPlayerPositions = new Map<string, { x: number; y: number }>(); // for FORTIFY
 
   async onCreate(_options: unknown) {
     this.setState(new LobbyState());
@@ -60,7 +68,7 @@ export class GameRoom extends Room<LobbyState> {
       player.selectedClass = message.playerClass;
     });
 
-    this.onMessage('ADD_BOT', (client, _message: unknown) => {
+    this.onMessage('ADD_BOT', (client, message: { playerClass?: string }) => {
       const requester = this.state.players.get(client.sessionId);
       if (!requester?.isHost) return;
 
@@ -68,11 +76,14 @@ export class GameRoom extends Room<LobbyState> {
       const humanCount = this.humanCount();
       if (botCount >= 3 || humanCount + botCount >= 4) return;
 
+      const validClasses = ['TANK', 'DAMAGE', 'SUPPORT'];
+      const botClass = validClasses.includes(message?.playerClass ?? '') ? message.playerClass! : this.randomClass();
+
       const bot = new PlayerSchema();
       bot.id = `bot_${crypto.randomUUID()}`;
       bot.displayName = BOT_NAMES[botCount] ?? `Bot ${botCount + 1}`;
       bot.isBot = true;
-      bot.selectedClass = this.randomClass();
+      bot.selectedClass = botClass;
       bot.isReady = true;
       bot.x = 800 + (botCount % 2 === 0 ? 80 : -80);
       bot.y = 600 + (botCount < 2 ? 80 : -80);
@@ -123,10 +134,10 @@ export class GameRoom extends Room<LobbyState> {
     this.onMessage('SELECT_SKILL', (client, message: { skillId: string }) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || player.isBot) return;
-      if (player.skillIds.length >= 6) return;
-      if (!ALL_SKILL_IDS.has(message.skillId)) return;
-      if (player.skillIds.toArray().includes(message.skillId)) return;
-      player.skillIds.push(message.skillId);
+      if (!this.isValidSkillId(message.skillId)) return;
+      this.applySkillSelection(player, message.skillId);
+      this.awaitingLevelUpIds.delete(client.sessionId);
+      this.dequeueNextLevelUp(client.sessionId);
     });
 
     this.onMessage('PLAYER_INPUT', (client, message: PlayerInput) => {
@@ -147,14 +158,12 @@ export class GameRoom extends Room<LobbyState> {
       if (this.state.gameState !== 'PRE_BOSS_SELECTION') return;
       const player = this.state.players.get(client.sessionId);
       if (!player || player.isBot) return;
-      if (!ALL_SKILL_IDS.has(message.skillId)) return;
+      if (!this.isValidSkillId(message.skillId)) return;
       if (!this.preBossSelections.has(client.sessionId)) return;  // not offered options
 
-      // Grant skill if player has capacity
-      if (player.skillIds.length < 6 && !player.skillIds.toArray().includes(message.skillId)) {
-        player.skillIds.push(message.skillId);
-      }
+      this.applySkillSelection(player, message.skillId);
       this.preBossSelections.set(client.sessionId, true);
+      this.broadcastPreBossWaiting();
       this.checkPreBossAllSelected();
     });
 
@@ -241,6 +250,10 @@ export class GameRoom extends Room<LobbyState> {
       skillIds:      leaving.skillIds.toArray(),
       weaponId:      leaving.weaponId,
       weaponLevel:   leaving.weaponLevel,
+      weapon2Id:     leaving.weapon2Id,
+      weapon2Level:  leaving.weapon2Level,
+      weapon3Id:     leaving.weapon3Id,
+      weapon3Level:  leaving.weapon3Level,
       passiveIds:    leaving.passiveIds.toArray(),
       passiveLevels: leaving.passiveLevels.toArray(),
     };
@@ -265,6 +278,10 @@ export class GameRoom extends Room<LobbyState> {
       snapshot.skillIds.forEach(id => bot.skillIds.push(id));
       bot.weaponId    = snapshot.weaponId;
       bot.weaponLevel = snapshot.weaponLevel;
+      bot.weapon2Id    = snapshot.weapon2Id;
+      bot.weapon2Level = snapshot.weapon2Level;
+      bot.weapon3Id    = snapshot.weapon3Id;
+      bot.weapon3Level = snapshot.weapon3Level;
       snapshot.passiveIds.forEach(id => bot.passiveIds.push(id));
       snapshot.passiveLevels.forEach(lvl => bot.passiveLevels.push(lvl));
       this.state.players.set(bot.id, bot);
@@ -301,52 +318,146 @@ export class GameRoom extends Room<LobbyState> {
   private startPreBossSelection(): void {
     this.state.gameState = 'PRE_BOSS_SELECTION';
     this.preBossSelections.clear();
+    this.pendingPreBossOfferIds.clear();
+    this.preBossSelectionStartedAt = Date.now();
     // Clear all enemies and projectiles before boss battle to reduce state patch size
     this.state.enemies.clear();
     this.state.projectiles.clear();
 
     for (const [sessionId, player] of this.state.players) {
       if (player.isBot) {
-        // 11.6: Bot auto-selects immediately
-        if (player.skillIds.length < 6) {
-          const options = drawSkillOptions(player.selectedClass, player.skillIds.toArray());
-          if (options.length > 0) {
-            const pick = options[Math.floor(Math.random() * options.length)]!;
-            if (!player.skillIds.toArray().includes(pick)) player.skillIds.push(pick);
-          }
-        }
+        // Bots auto-select immediately
+        const opts = this.drawPlayerSkillOptions(player);
+        if (opts.length > 0) this.applySkillSelection(player, opts[Math.floor(Math.random() * opts.length)]!);
         continue;
       }
-      if (player.skillIds.length >= 6) {
-        // Already maxed — mark as auto-selected
-        this.preBossSelections.set(sessionId, true);
+      // Player mid-level-up: defer pre-boss offer until they finish selecting
+      if (this.awaitingLevelUpIds.has(sessionId) || (this.pendingLevelUpCounts.get(sessionId) ?? 0) > 0) {
+        this.pendingPreBossOfferIds.add(sessionId);
+        this.preBossSelections.set(sessionId, false);  // mark as pending in tracker
         continue;
       }
-      const options = drawSkillOptions(player.selectedClass, player.skillIds.toArray());
-      this.preBossSelections.set(sessionId, false);
-      const client = this.clients.find(c => c.sessionId === sessionId);
-      if (client) this.send(client, 'PRE_BOSS_SKILL_OPTIONS', { options });
+      this.sendPreBossOffer(sessionId);
     }
+
+    // Broadcast initial waiting status to all players
+    this.broadcastPreBossWaiting(SELECTION_TIMEOUT_MS);
 
     this.clock.setTimeout(() => {
       if (this.state.gameState !== 'PRE_BOSS_SELECTION') return;
-      // Auto-assign for players who did not select
+      // Auto-assign for players who did not select (including pending pre-boss offers)
       this.autoAssignPreBossSkills();
       this.enterBossBattle();
     }, SELECTION_TIMEOUT_MS);
   }
 
+  /** Send pre-boss skill offer to a specific player. */
+  private sendPreBossOffer(sessionId: string): void {
+    const player = this.state.players.get(sessionId);
+    if (!player || player.isBot) return;
+    const options = this.drawPlayerSkillOptions(player);
+    if (options.length === 0) {
+      this.preBossSelections.set(sessionId, true);
+      this.broadcastPreBossWaiting();
+      this.checkPreBossAllSelected();
+      return;
+    }
+    const ownedLevels = this.buildOwnedLevels(player);
+    this.preBossSelections.set(sessionId, false);
+    const client = this.clients.find(c => c.sessionId === sessionId);
+    if (client) this.send(client, 'PRE_BOSS_SKILL_OPTIONS', { options, ownedLevels, weaponId: player.weaponId, weaponLevel: player.weaponLevel, weapon2Id: player.weapon2Id, weapon2Level: player.weapon2Level, weapon3Id: player.weapon3Id, weapon3Level: player.weapon3Level });
+  }
+
   private autoAssignPreBossSkills(): void {
+    // Auto-assign any players still mid-level-up (their pending level-ups + the current one)
+    for (const sessionId of [...this.awaitingLevelUpIds, ...this.pendingPreBossOfferIds]) {
+      this.autoAssignLevelUps(sessionId);
+    }
+    this.pendingPreBossOfferIds.clear();
+
+    // Auto-assign unselected pre-boss skill options
     for (const [sessionId, selected] of this.preBossSelections) {
       if (selected) continue;
       const player = this.state.players.get(sessionId);
-      if (!player || player.skillIds.length >= 6) continue;
-      const options = drawSkillOptions(player.selectedClass, player.skillIds.toArray());
-      if (options.length > 0) {
-        const pick = options[Math.floor(Math.random() * options.length)]!;
-        if (!player.skillIds.toArray().includes(pick)) player.skillIds.push(pick);
-      }
+      if (!player) continue;
+      const options = this.drawPlayerSkillOptions(player);
+      if (options.length > 0) this.applySkillSelection(player, options[Math.floor(Math.random() * options.length)]!);
     }
+  }
+
+  /** Broadcast current pre-boss waiting status to all players. */
+  private broadcastPreBossWaiting(timeLeft?: number): void {
+    const waitingNames = [...this.preBossSelections.entries()]
+      .filter(([, done]) => !done)
+      .map(([sid]) => this.state.players.get(sid)?.displayName ?? '');
+    const ms = timeLeft ?? Math.max(0, SELECTION_TIMEOUT_MS - (Date.now() - this.preBossSelectionStartedAt));
+    this.broadcast('PRE_BOSS_WAITING', { waitingNames, timeLeft: ms });
+  }
+
+  /** Send the next queued level-up to the player if any are pending.
+   *  After all level-ups are done, delivers a pending pre-boss offer if applicable. */
+  private dequeueNextLevelUp(sessionId: string): void {
+    const pending = this.pendingLevelUpCounts.get(sessionId) ?? 0;
+    if (pending > 0) {
+      const player = this.state.players.get(sessionId);
+      if (!player) return;
+      const client = this.clients.find(c => c.sessionId === sessionId);
+      if (!client) return;
+      this.pendingLevelUpCounts.set(sessionId, pending - 1);
+      this.awaitingLevelUpIds.add(sessionId);
+      this.sendLevelUpMessage(client, player);
+      return;
+    }
+    // All level-ups done — check if a pre-boss offer is waiting
+    if (this.state.gameState === 'PRE_BOSS_SELECTION' && this.pendingPreBossOfferIds.has(sessionId)) {
+      this.pendingPreBossOfferIds.delete(sessionId);
+      this.sendPreBossOffer(sessionId);
+      this.broadcastPreBossWaiting();
+    }
+  }
+
+  /** Build and send a LEVEL_UP message to a client based on current player state. */
+  private sendLevelUpMessage(client: Client, player: PlayerSchema): void {
+    const options = this.drawPlayerSkillOptions(player);
+    if (options.length === 0) {
+      this.awaitingLevelUpIds.delete(client.sessionId);
+      this.dequeueNextLevelUp(client.sessionId);
+      return;
+    }
+    this.send(client, 'LEVEL_UP', {
+      level: player.level,
+      options,
+      ownedLevels: this.buildOwnedLevels(player),
+      weaponId: player.weaponId,
+      weaponLevel: player.weaponLevel,
+      weapon2Id: player.weapon2Id,
+      weapon2Level: player.weapon2Level,
+      weapon3Id: player.weapon3Id,
+      weapon3Level: player.weapon3Level,
+    });
+  }
+
+  /** Auto-assign current + all queued level-ups for a player (used before phase transitions). */
+  private autoAssignLevelUps(sessionId: string): void {
+    const player = this.state.players.get(sessionId);
+    if (!player || player.isBot) {
+      this.awaitingLevelUpIds.delete(sessionId);
+      this.pendingLevelUpCounts.delete(sessionId);
+      return;
+    }
+    // Auto-assign the currently-shown selection
+    if (this.awaitingLevelUpIds.has(sessionId)) {
+      this.awaitingLevelUpIds.delete(sessionId);
+      const opts = this.drawPlayerSkillOptions(player);
+      if (opts.length > 0) this.applySkillSelection(player, opts[Math.floor(Math.random() * opts.length)]!);
+    }
+    // Auto-assign all queued pending level-ups
+    const pending = this.pendingLevelUpCounts.get(sessionId) ?? 0;
+    for (let i = 0; i < pending; i++) {
+      const opts = this.drawPlayerSkillOptions(player);
+      if (opts.length > 0) this.applySkillSelection(player, opts[Math.floor(Math.random() * opts.length)]!);
+    }
+    this.pendingLevelUpCounts.delete(sessionId);
   }
 
   /** 12.3: Proximity-based rescue — any active player near a downed teammate auto-revives them. */
@@ -386,7 +497,8 @@ export class GameRoom extends Room<LobbyState> {
       }
 
       const progress = this.rescueProgress.get(rescuerId) ?? { targetId: nearestDownedId, ms: 0 };
-      progress.ms += 60;
+      const reviveBoostLv = this.getSkillLevel(rescuer, 'REVIVE_BOOST');
+      progress.ms += 60 * (1 + reviveBoostLv * 0.5); // +50% speed per level
 
       if (progress.ms >= RESCUE_DURATION_MS) {
         this.rescueProgress.delete(rescuerId);
@@ -574,14 +686,40 @@ export class GameRoom extends Room<LobbyState> {
     }
   }
 
-  /** Reduce player HP and trigger down-state or game-over if HP reaches zero. */
-  private damagePlayer(sessionId: string, amount: number): void {
+  /** Reduce player HP with full skill mitigation chain (DODGE → BARRIER → TOUGH → SHIELD). */
+  private damagePlayer(sessionId: string, rawAmount: number): void {
     const player = this.state.players.get(sessionId);
     if (!player || player.isDown || player.isDisconnected) return;
+
+    // DODGE: full evasion (15% per level)
+    const dodgeLv = this.getSkillLevel(player, 'DODGE');
+    if (dodgeLv > 0 && Math.random() < dodgeLv * 0.15) return;
+
+    // BARRIER: 20% per level chance to halve incoming damage
+    const barrierLv = this.getSkillLevel(player, 'BARRIER');
+    let amount = rawAmount;
+    if (barrierLv > 0 && Math.random() < barrierLv * 0.20) amount = Math.ceil(amount / 2);
+
+    // TOUGH: flat reduction 10% per level
+    const toughLv = this.getSkillLevel(player, 'TOUGH');
+    if (toughLv > 0) amount = Math.max(1, Math.round(amount * (1 - toughLv * 0.10)));
+
+    // SHIELD: shieldHp absorbs first
+    if (player.shieldHp > 0) {
+      const absorbed = Math.min(player.shieldHp, amount);
+      player.shieldHp -= absorbed;
+      amount -= absorbed;
+      if (amount <= 0) { this.rescueProgress.delete(sessionId); return; }
+    }
+
     player.hp = Math.max(0, player.hp - amount);
-    player.totalDamageTaken += amount;  // 13.1
-    // 12.3: taking damage cancels any in-progress rescue
+    player.totalDamageTaken += amount;
     this.rescueProgress.delete(sessionId);
+
+    // Notify client for SFX
+    const client = this.clients.find(c => c.sessionId === sessionId);
+    if (client) this.send(client, 'PLAYER_HURT', {});
+
     if (player.hp <= 0) this.downPlayer(sessionId);
   }
 
@@ -633,8 +771,18 @@ export class GameRoom extends Room<LobbyState> {
     if (!type || !defId) return;
 
     if (type === 'WEAPON') {
-      player.weaponId    = defId;
-      player.weaponLevel = 0;
+      // Fill empty slot: slot 1 → 2 → 3; no replacement when all 3 are full
+      if (!player.weaponId) {
+        player.weaponId    = defId;
+        player.weaponLevel = 0;
+      } else if (!player.weapon2Id) {
+        player.weapon2Id    = defId;
+        player.weapon2Level = 0;
+      } else if (!player.weapon3Id) {
+        player.weapon3Id    = defId;
+        player.weapon3Level = 0;
+      }
+      // All 3 slots full — silently skip (UI should not offer this)
       player.maxHp = this.getEffectiveStats(player).maxHp;
     } else if (type === 'PASSIVE') {
       if (player.passiveIds.length < 4) {
@@ -672,6 +820,16 @@ export class GameRoom extends Room<LobbyState> {
     if (this.state.survivalTimeLeft !== seconds) {
       this.state.survivalTimeLeft = Math.max(0, seconds);
     }
+
+    // Survival XP trickle: 2 XP every 3 seconds to all alive players
+    this.xpTrickleAccum += 60;
+    if (this.xpTrickleAccum >= 3000) {
+      this.xpTrickleAccum = 0;
+      for (const [sid, p] of this.state.players) {
+        if (!p.isDown && !p.isDisconnected) this.grantXp(sid, 2);
+      }
+    }
+
     if (this.survivalTimeLeftMs <= 0) {
       this.startPreBossSelection();  // 10.3: sends skill options before entering boss battle
     }
@@ -684,40 +842,188 @@ export class GameRoom extends Room<LobbyState> {
     player.hp = Math.min(player.maxHp, player.hp + Math.round(amount * healBonus));
   }
 
+  /** Returns current level (1–MAX) of a skill for a player; 0 if not owned. */
+  private getSkillLevel(player: PlayerSchema, skillId: string): number {
+    const idx = player.skillIds.toArray().indexOf(skillId);
+    return idx >= 0 ? (player.skillLevels[idx] ?? 1) : 0;
+  }
+
+  /** Grant a skill or upgrade it if already owned. Handles new-skill init + HEAL instant HP. */
+  private applySkillSelection(player: PlayerSchema, skillId: string): void {
+    // Slot-2 weapon acquisition: "W2:SWORD" etc.
+    if (skillId.startsWith('W2:')) {
+      const wid = skillId.slice(3);
+      if (WEAPON_DEF_IDS.includes(wid) && player.weaponId && !player.weapon2Id) {
+        player.weapon2Id = wid;
+        player.weapon2Level = 0;
+        player.maxHp = this.getEffectiveStats(player).maxHp;
+      }
+      return;
+    }
+    // Slot-3 weapon acquisition: "W3:SWORD" etc.
+    if (skillId.startsWith('W3:')) {
+      const wid = skillId.slice(3);
+      if (WEAPON_DEF_IDS.includes(wid) && player.weaponId && player.weapon2Id && !player.weapon3Id) {
+        player.weapon3Id = wid;
+        player.weapon3Level = 0;
+        player.maxHp = this.getEffectiveStats(player).maxHp;
+      }
+      return;
+    }
+    // Slot-2 weapon upgrade
+    if (skillId === 'WEAPON2_LEVEL') {
+      if (player.weapon2Id && player.weapon2Level < MAX_WEAPON_LEVEL) {
+        player.weapon2Level += 1;
+        player.maxHp = this.getEffectiveStats(player).maxHp;
+      }
+      return;
+    }
+    // Slot-3 weapon upgrade
+    if (skillId === 'WEAPON3_LEVEL') {
+      if (player.weapon3Id && player.weapon3Level < MAX_WEAPON_LEVEL) {
+        player.weapon3Level += 1;
+        player.maxHp = this.getEffectiveStats(player).maxHp;
+      }
+      return;
+    }
+    // Slot-1 weapon acquisition — player selects a weapon for the first time
+    if (WEAPON_DEF_IDS.includes(skillId)) {
+      player.weaponId = skillId;
+      player.weaponLevel = 0;
+      player.maxHp = this.getEffectiveStats(player).maxHp;
+      return;
+    }
+    // Slot-1 weapon upgrade
+    if (skillId === 'WEAPON_LEVEL') {
+      if (player.weaponId && player.weaponLevel < MAX_WEAPON_LEVEL) {
+        player.weaponLevel += 1;
+        player.maxHp = this.getEffectiveStats(player).maxHp;
+      }
+      return;
+    }
+
+    const ids    = player.skillIds.toArray();
+    const levels = player.skillLevels.toArray();
+    const idx    = ids.indexOf(skillId);
+    const isStatBoost = (STAT_BOOST_IDS as readonly string[]).includes(skillId);
+    if (idx >= 0) {
+      // Upgrade existing skill (stat boosts have no cap)
+      const cur = levels[idx] ?? 1;
+      if (isStatBoost || cur < MAX_SKILL_LEVEL) player.skillLevels[idx] = cur + 1;
+    } else {
+      // New skill — need a free slot (expanded to 8, stat boosts share the pool)
+      if (player.skillIds.length >= 8) return;
+      player.skillIds.push(skillId);
+      player.skillLevels.push(1);
+    }
+    // HEAL: instant HP restore on acquire/upgrade
+    if (skillId === 'HEAL') {
+      const lv = this.getSkillLevel(player, 'HEAL');
+      player.hp = Math.min(player.maxHp, player.hp + 20 * lv);
+    }
+    // Recalculate maxHp when a stat-affecting skill is gained
+    player.maxHp = this.getEffectiveStats(player).maxHp;
+  }
+
+  /** Draws skill options for a player, including all three weapon slots. */
+  private drawPlayerSkillOptions(player: PlayerSchema, count = 3): string[] {
+    // Offer weapons for any empty slot (slot 1: bare IDs; slot 2: W2: prefix; slot 3: W3: prefix)
+    const hasAllSlots = player.weaponId && player.weapon2Id && player.weapon3Id;
+    const availableWeapons = hasAllSlots ? [] : WEAPON_DEF_IDS;
+    return drawSkillOptions(
+      player.selectedClass,
+      player.skillIds.toArray(),
+      player.skillLevels.toArray(),
+      count,
+      player.weaponId,
+      player.weaponLevel,
+      availableWeapons,
+      player.weapon2Id,
+      player.weapon2Level,
+      player.weapon3Id,
+      player.weapon3Level,
+    );
+  }
+
+  /** Returns true if skillId is a valid selection option (skill, weapon acquire, or weapon upgrade). */
+  private isValidSkillId(skillId: string): boolean {
+    if (ALL_SKILL_IDS.has(skillId)) return true;
+    if (WEAPON_DEF_IDS.includes(skillId)) return true;
+    if (skillId === 'WEAPON_LEVEL' || skillId === 'WEAPON2_LEVEL' || skillId === 'WEAPON3_LEVEL') return true;
+    if (skillId.startsWith('W2:') && WEAPON_DEF_IDS.includes(skillId.slice(3))) return true;
+    if (skillId.startsWith('W3:') && WEAPON_DEF_IDS.includes(skillId.slice(3))) return true;
+    return false;
+  }
+
+  /** Build ownedLevels map to send to client (skillId → current level). */
+  private buildOwnedLevels(player: PlayerSchema): Record<string, number> {
+    const result: Record<string, number> = {};
+    player.skillIds.toArray().forEach((id, i) => {
+      result[id] = player.skillLevels[i] ?? 1;
+    });
+    return result;
+  }
+
+  /** Grant kill XP to the killer and share 50% with active teammates within 300 px. */
+  private shareKillXp(killerId: string, xpReward: number): void {
+    this.grantXp(killerId, xpReward);
+    const killer = this.state.players.get(killerId);
+    if (!killer) return;
+    const SHARE_RADIUS_SQ = 300 * 300;
+    for (const [sid, p] of this.state.players) {
+      if (sid === killerId || p.isDown || p.isDisconnected) continue;
+      const dx = p.x - killer.x;
+      const dy = p.y - killer.y;
+      if (dx * dx + dy * dy <= SHARE_RADIUS_SQ) {
+        this.grantXp(sid, Math.floor(xpReward * 0.5));
+      }
+    }
+  }
+
   private grantXp(sessionId: string, amount: number): void {
     const player = this.state.players.get(sessionId);
     if (!player) return;
 
     player.xp += amount;
-    const threshold = player.level * 100;
+    // Gentle cumulative growth: ~80 at lv1, ~107 at lv5, ~143 at lv10, ~257 at lv20, ~460 at lv30
+    const threshold = Math.floor(80 * Math.pow(1.06, player.level - 1));
 
     if (player.xp >= threshold) {
       player.xp -= threshold;
       player.level += 1;
 
-      if (player.skillIds.length >= 6) return;
-
-      const options = drawSkillOptions(
-        player.selectedClass,
-        player.skillIds.toArray(),
-      );
-
       if (player.isBot) {
-        // 11.6: Bot auto-selects a random skill immediately
-        if (options.length > 0) {
-          const pick = options[Math.floor(Math.random() * options.length)]!;
-          if (!player.skillIds.toArray().includes(pick)) player.skillIds.push(pick);
-        }
+        const options = this.drawPlayerSkillOptions(player);
+        if (options.length > 0) this.applySkillSelection(player, options[Math.floor(Math.random() * options.length)]!);
         return;
       }
 
       const client = this.clients.find((c) => c.sessionId === sessionId);
-      if (client) this.send(client, 'LEVEL_UP', { level: player.level, options });
+      if (!client) return;
+
+      if (this.awaitingLevelUpIds.has(sessionId)) {
+        // Player is already viewing a skill selection — queue this level-up
+        this.pendingLevelUpCounts.set(sessionId, (this.pendingLevelUpCounts.get(sessionId) ?? 0) + 1);
+      } else {
+        this.awaitingLevelUpIds.add(sessionId);
+        this.sendLevelUpMessage(client, player);
+      }
     }
   }
 
-  // Predefined spawn node pool — positions are fixed on the placeholder map (1600×1200 world).
-  // task 15.2 (real tilemap) will update these to match actual map layout.
+  // Enemies spawn from outside the map edges and walk inward.
+  // World: 1600×1200.  Spawn positions are just beyond each edge.
+  private static randomEdgeSpawn(): { x: number; y: number } {
+    const edge = Math.floor(Math.random() * 4);
+    switch (edge) {
+      case 0: return { x: 80 + Math.random() * 1440, y: -30 };           // top
+      case 1: return { x: 80 + Math.random() * 1440, y: 1230 };          // bottom
+      case 2: return { x: -30,  y: 80 + Math.random() * 1040 };          // left
+      default: return { x: 1630, y: 80 + Math.random() * 1040 };         // right
+    }
+  }
+
+  // Legacy pool kept for any code that still references SPAWN_NODES directly.
   private static readonly SPAWN_NODES = [
     { x: 200, y: 160 }, { x: 500, y: 160 }, { x: 800, y: 160 }, { x: 1100, y: 160 }, { x: 1400, y: 160 },
     { x: 200, y: 400 }, { x: 500, y: 400 }, { x: 800, y: 400 }, { x: 1100, y: 400 }, { x: 1400, y: 400 },
@@ -729,6 +1035,7 @@ export class GameRoom extends Room<LobbyState> {
   private startSurvivalPhase(): void {
     const SURVIVAL_DURATION_MS = 3 * 60 * 1000;  // 3 minutes (design doc suggestion)
     this.survivalTimeLeftMs = SURVIVAL_DURATION_MS;
+    this.xpTrickleAccum = 0;
     this.state.survivalTimeLeft = SURVIVAL_DURATION_MS / 1000;
     this.state.gameState = 'SURVIVAL_PHASE';
   }
@@ -742,16 +1049,15 @@ export class GameRoom extends Room<LobbyState> {
   }
 
   private spawnEliteEnemy(): void {
-    const nodes = GameRoom.SPAWN_NODES;
-    const pos = nodes[Math.floor(Math.random() * nodes.length)]!;
-
+    const pos = GameRoom.randomEdgeSpawn();
     const elite = new EnemySchema();
     elite.id    = crypto.randomUUID();
     elite.type  = 'elite';
     elite.x     = pos.x;
     elite.y     = pos.y;
-    elite.maxHp = 300;
-    elite.hp    = 300;
+    const eliteHp = 400 + (this.state.currentRound - 1) * 120;  // R1:400, R2:520, R3:640…
+    elite.maxHp = eliteHp;
+    elite.hp    = eliteHp;
     this.state.enemies.set(elite.id, elite);
   }
 
@@ -797,24 +1103,37 @@ export class GameRoom extends Room<LobbyState> {
 
     const result = { ...base, attackRange: baseRange };
 
-    // Skill bonuses
-    const skills = player.skillIds.toArray();
-    for (const skillId of skills) {
-      switch (skillId) {
-        case 'IRON_SKIN':   result.maxHp        += 40;   break;  // TANK: +40 max HP
-        case 'POWER_UP':    result.attackDamage += 5;    break;  // DAMAGE: +5 atk
-        case 'SWIFT_FEET':  result.speed        += 30;   result.attackDamage -= 3; break;  // DAMAGE: +speed -dmg
-        case 'SPEED_UP':    result.speed        += 20;   break;  // common: +speed
-        case 'TOUGH':       result.maxHp        += 25;   break;  // common: +HP
-        case 'SHIELD':      result.maxHp        += 30;   break;  // TANK
-        case 'FORTIFY':     result.maxHp        += 20;   break;  // TANK
-        case 'HEAL':        result.healBonus    += 0.2;  break;  // SUPPORT
-        case 'REGEN':       /* handled per-tick in processAutoAttack */ break;
-      }
-    }
+    // Skill bonuses — all scale with level (lv=0 means not owned)
+    const lv = (id: string) => this.getSkillLevel(player, id);
+    if (lv('IRON_SKIN'))  result.maxHp        += 40  * lv('IRON_SKIN');
+    if (lv('POWER_UP'))   result.attackDamage += 5   * lv('POWER_UP');
+    if (lv('SWIFT_FEET')) { result.speed += 30 * lv('SWIFT_FEET'); result.attackDamage -= 3 * lv('SWIFT_FEET'); }
+    if (lv('SPEED_UP'))   result.speed        += 20  * lv('SPEED_UP');
+    if (lv('HEAL'))       result.healBonus    += 0.2 * lv('HEAL');
+    // Repeatable stat boosts (active after all other skills/weapons are maxed)
+    if (lv('STAT_HP'))    result.maxHp        += 15  * lv('STAT_HP');
+    if (lv('STAT_ATK'))   result.attackDamage += 3   * lv('STAT_ATK');
+    if (lv('STAT_SPD'))   result.speed        += 10  * lv('STAT_SPD');
+    // TOUGH, DODGE, BARRIER handled in damagePlayer; SHIELD via shieldHp; FORTIFY per-tick; TAUNT in AI
 
     if (player.weaponId && EQUIPMENT_DEFS[player.weaponId]) {
       const mods = scaleModifiers(EQUIPMENT_DEFS[player.weaponId]!.modifiers, player.weaponLevel);
+      result.maxHp        += mods.maxHp        ?? 0;
+      result.attackDamage += mods.attackDamage ?? 0;
+      result.speed        += mods.speed        ?? 0;
+      result.healBonus    += mods.healBonus    ?? 0;
+      result.attackRange  += mods.attackRange  ?? 0;
+    }
+    if (player.weapon2Id && EQUIPMENT_DEFS[player.weapon2Id]) {
+      const mods = scaleModifiers(EQUIPMENT_DEFS[player.weapon2Id]!.modifiers, player.weapon2Level);
+      result.maxHp        += mods.maxHp        ?? 0;
+      result.attackDamage += mods.attackDamage ?? 0;
+      result.speed        += mods.speed        ?? 0;
+      result.healBonus    += mods.healBonus    ?? 0;
+      result.attackRange  += mods.attackRange  ?? 0;
+    }
+    if (player.weapon3Id && EQUIPMENT_DEFS[player.weapon3Id]) {
+      const mods = scaleModifiers(EQUIPMENT_DEFS[player.weapon3Id]!.modifiers, player.weapon3Level);
       result.maxHp        += mods.maxHp        ?? 0;
       result.attackDamage += mods.attackDamage ?? 0;
       result.speed        += mods.speed        ?? 0;
@@ -907,15 +1226,16 @@ export class GameRoom extends Room<LobbyState> {
 
   /** Chase/shoot the nearest active player, apply contact damage, push-apart collision. */
   private processEnemyAI(): void {
-    const BASIC_SPEED   = 55;   // px/s
-    const ELITE_SPEED   = 90;
-    const RANGED_SPEED  = 40;
+    const round = this.state.currentRound;
+    const BASIC_SPEED   = 65 + (round - 1) * 5;  // px/s; R1:65, R2:70, R3:75…
+    const ELITE_SPEED   = 95 + (round - 1) * 5;
+    const RANGED_SPEED  = 45 + (round - 1) * 3;
     const WALL = 32 + 10;       // world border + half-sprite
     const CONTACT_RANGE     = 20;    // px — melee contact distance
-    const RANGED_ATTACK_DIST = 180;  // px — ranged enemy preferred attack distance
-    const MELEE_DAMAGE       = 5;    // per 60ms tick contact
-    const ELITE_DAMAGE       = 8;
-    const RANGED_DAMAGE      = 5;
+    const RANGED_ATTACK_DIST = 200;  // px — ranged enemy preferred attack distance
+    const MELEE_DAMAGE       = 6;    // per 60ms tick contact (~100 DPS)
+    const ELITE_DAMAGE       = 10;   // (~167 DPS)
+    const RANGED_DAMAGE      = 6;
     const RANGED_PROJ_SPEED  = 300;  // px/s — enemy projectile travel speed
     const PUSH_APART_RADIUS  = 22;   // px — enemy-enemy separation
 
@@ -1053,6 +1373,35 @@ export class GameRoom extends Room<LobbyState> {
         continue;
       }
 
+      // Player projectiles (WAND) — check enemy collision
+      if (this.playerProjectileIds.has(id)) {
+        let hit = false;
+        // Check boss first
+        if (this.state.gameState === 'BOSS_BATTLE' && this.state.boss.id) {
+          const dx = this.state.boss.x - proj.x;
+          const dy = this.state.boss.y - proj.y;
+          if (dx * dx + dy * dy <= 30 * 30) {
+            this.hitBoss(proj.ownerId, proj.damage);
+            hit = true;
+            if (this.state.boss.hp <= 0) this.startPostBossSelection();
+          }
+        }
+        if (!hit) {
+          for (const [eid, enemy] of this.state.enemies) {
+            const dx = enemy.x - proj.x;
+            const dy = enemy.y - proj.y;
+            if (dx * dx + dy * dy <= 15 * 15) {
+              this.hitEnemy(proj.ownerId, eid, proj.damage, proj.angle);
+              hit = true;
+              break;
+            }
+          }
+        }
+        if (hit) { toDelete.push(id); this.playerProjectileIds.delete(id); }
+        continue;
+      }
+
+      // Enemy/boss projectiles — check player collision
       for (const [sessionId, player] of this.state.players) {
         if (player.isDown || player.isDisconnected) continue;
         const dx = player.x - proj.x;
@@ -1064,160 +1413,326 @@ export class GameRoom extends Room<LobbyState> {
         }
       }
     }
-    for (const id of toDelete) this.state.projectiles.delete(id);
+    for (const id of toDelete) {
+      this.state.projectiles.delete(id);
+      this.playerProjectileIds.delete(id);
+    }
   }
 
   private spawnInitialEnemies(): void {
-    const spawnPoints = [
-      { x: 200, y: 200 }, { x: 550, y: 180 }, { x: 900, y: 200 }, { x: 1250, y: 180 }, { x: 1500, y: 200 },
-      { x: 180, y: 480 }, { x: 500, y: 500 }, { x: 800, y: 480 }, { x: 1100, y: 500 }, { x: 1420, y: 480 },
-      { x: 200, y: 760 }, { x: 550, y: 780 }, { x: 900, y: 760 }, { x: 1250, y: 780 }, { x: 1500, y: 760 },
-      { x: 180, y: 1040 },{ x: 500, y: 1020 },{ x: 800, y: 1040 },{ x: 1100, y: 1020 },{ x: 1420, y: 1040 },
-    ];
-    spawnPoints.forEach((pos, i) => {
+    const round = this.state.currentRound;
+    // Count scales: 20 at round 1 → +5 per round (25, 30, …)
+    const COUNT = 20 + (round - 1) * 5;
+    // HP scales: basic 180 at R1 → +40/round; ranged 110 → +25/round
+    // (enemies must survive long enough at 65 px/s to close a 280px weapon range)
+    const basicHp  = 180 + (round - 1) * 40;
+    const rangedHp = 110 + (round - 1) * 25;
+    for (let i = 0; i < COUNT; i++) {
+      const pos = GameRoom.randomEdgeSpawn();
       const enemy = new EnemySchema();
-      enemy.id = crypto.randomUUID();
+      enemy.id   = crypto.randomUUID();
       // Every 4th enemy is a ranged type
       enemy.type = (i % 4 === 3) ? 'ranged' : 'basic';
-      enemy.x = pos.x;
-      enemy.y = pos.y;
-      enemy.maxHp = enemy.type === 'ranged' ? 35 : 50;
+      enemy.x    = pos.x;
+      enemy.y    = pos.y;
+      enemy.maxHp = enemy.type === 'ranged' ? rangedHp : basicHp;
       enemy.hp    = enemy.maxHp;
       this.state.enemies.set(enemy.id, enemy);
-    });
+    }
   }
 
   private processAutoAttack(): void {
-    const ATTACK_COOLDOWN = 500;    // ms between attacks
+    // Weapon-specific cooldowns (ms)
+    const COOLDOWN: Record<string, number> = { '': 500, SWORD: 600, SPEAR: 700, WAND: 800 };
 
     for (const [sessionId, player] of this.state.players) {
       if (player.isDown || player.isDisconnected) continue;
 
-      // REGEN: heal 2 HP/sec via fractional accumulator (prevents instant full-heal)
-      if (player.skillIds.toArray().includes('REGEN')) {
-        const accum = (this.regenAccum.get(sessionId) ?? 0) + 2 * this.DT;
+      // --- Passive per-tick regen ---
+      // REGEN: +2 HP/sec per level; STAT_REGEN: +0.5 HP/sec per stack
+      const regenLv = this.getSkillLevel(player, 'REGEN');
+      const statRegenLv = this.getSkillLevel(player, 'STAT_REGEN');
+      const totalRegen = 2 * regenLv + 0.5 * statRegenLv;
+      if (totalRegen > 0) {
+        const accum = (this.regenAccum.get(sessionId) ?? 0) + totalRegen * this.DT;
         const whole = Math.floor(accum);
         this.regenAccum.set(sessionId, accum - whole);
         if (whole > 0) player.hp = Math.min(player.maxHp, player.hp + whole);
       }
 
+      // FORTIFY: +3 HP/sec per level when stationary
+      const fortifyLv = this.getSkillLevel(player, 'FORTIFY');
+      if (fortifyLv > 0) {
+        const prev = this.prevPlayerPositions.get(sessionId);
+        const stationary = prev && Math.abs(prev.x - player.x) < 2 && Math.abs(prev.y - player.y) < 2;
+        if (stationary) {
+          const facc = (this.regenAccum.get(`f:${sessionId}`) ?? 0) + 3 * fortifyLv * this.DT;
+          const fw = Math.floor(facc);
+          this.regenAccum.set(`f:${sessionId}`, facc - fw);
+          if (fw > 0) player.hp = Math.min(player.maxHp, player.hp + fw);
+        }
+      }
+      this.prevPlayerPositions.set(sessionId, { x: player.x, y: player.y });
+
+      // SHIELD: regenerate shield HP at 5/sec up to (30 * level)
+      const shieldLv = this.getSkillLevel(player, 'SHIELD');
+      if (shieldLv > 0) {
+        const maxShield = shieldLv * 30;
+        if (player.shieldHp < maxShield) {
+          const sacc = (this.regenAccum.get(`s:${sessionId}`) ?? 0) + 5 * this.DT;
+          const sw = Math.floor(sacc);
+          this.regenAccum.set(`s:${sessionId}`, sacc - sw);
+          if (sw > 0) player.shieldHp = Math.min(maxShield, player.shieldHp + sw);
+        }
+      }
+
+      // --- Attack cooldown ---
       const cooldown = this.attackCooldowns.get(sessionId) ?? 0;
       if (cooldown > 0) {
         this.attackCooldowns.set(sessionId, cooldown - 60);
         continue;
       }
 
-      const stats = this.getEffectiveStats(player);  // 9.4: includes equipment + skill bonuses
-
+      const stats = this.getEffectiveStats(player);
       const auraMult = this.getAuraMultiplier(sessionId);
       let attackDamage = Math.round(stats.attackDamage * auraMult);
 
-      // Skill modifiers on attack
-      const skills = player.skillIds.toArray();
-      // CRITICAL: 25% chance to deal 2x damage
-      if (skills.includes('CRITICAL') && Math.random() < 0.25) attackDamage *= 2;
-      // BERSERKER: bonus damage scaling with missing HP (up to +50% at 0 HP)
-      if (skills.includes('BERSERKER')) {
-        const missingHpRatio = 1 - player.hp / Math.max(1, player.maxHp);
-        attackDamage = Math.round(attackDamage * (1 + 0.5 * missingHpRatio));
+      // CRITICAL: (20% + level*5%) chance to deal (1.5 + level*0.25)x damage
+      const critLv = this.getSkillLevel(player, 'CRITICAL');
+      if (critLv > 0 && Math.random() < 0.20 + critLv * 0.05) {
+        attackDamage = Math.round(attackDamage * (1.5 + critLv * 0.25));
+      }
+      // BERSERKER: bonus damage up to (40 + level*20)% at 0 HP
+      const berserkerLv = this.getSkillLevel(player, 'BERSERKER');
+      if (berserkerLv > 0) {
+        const missingRatio = 1 - player.hp / Math.max(1, player.maxHp);
+        attackDamage = Math.round(attackDamage * (1 + (0.40 + berserkerLv * 0.20) * missingRatio));
       }
 
-      // 10.6: In BOSS_BATTLE players attack the boss automatically (no friendly fire)
+      const multiStrikeLv = this.getSkillLevel(player, 'MULTI_STRIKE');
+      const weapon = player.weaponId;
+      const wLv = player.weaponLevel;
+      // Cooldown determined by the fastest weapon equipped (all 3 slots)
+      const w2Cooldown = player.weapon2Id ? Math.max(200, Math.round((COOLDOWN[player.weapon2Id] ?? 500) * (1 - player.weapon2Level * 0.08))) : Infinity;
+      const w3Cooldown = player.weapon3Id ? Math.max(200, Math.round((COOLDOWN[player.weapon3Id] ?? 500) * (1 - player.weapon3Level * 0.08))) : Infinity;
+      const attackCooldown = Math.min(
+        Math.max(200, Math.round((COOLDOWN[weapon] ?? 500) * (1 - wLv * 0.08))),
+        w2Cooldown,
+        w3Cooldown,
+      );
+
+      // ===================== BOSS BATTLE =====================
       if (this.state.gameState === 'BOSS_BATTLE') {
         const boss = this.state.boss;
         if (!boss.id || boss.hp <= 0) continue;
-        const dx = boss.x - player.x;
-        const dy = boss.y - player.y;
-        if (dx * dx + dy * dy > stats.attackRange * stats.attackRange) continue;
 
-        boss.hp = Math.max(0, boss.hp - attackDamage);
-        player.totalDamage += attackDamage;  // 13.1
+        const firedW1 = this.fireWeaponAtBoss(sessionId, player, weapon, wLv, attackDamage, multiStrikeLv, stats);
+        const firedW2 = player.weapon2Id
+          ? this.fireWeaponAtBoss(sessionId, player, player.weapon2Id, player.weapon2Level, attackDamage, 0, stats)
+          : false;
+        const firedW3 = player.weapon3Id
+          ? this.fireWeaponAtBoss(sessionId, player, player.weapon3Id, player.weapon3Level, attackDamage, 0, stats)
+          : false;
+        if (!firedW1 && !firedW2 && !firedW3) continue;
 
-        if (skills.includes('LIFESTEAL')) {
-          this.restoreHp(sessionId, Math.round(attackDamage * 0.2));
-        }
-        if (skills.includes('MULTI_STRIKE')) {
-          const extra = Math.round(attackDamage * 0.5);
-          boss.hp = Math.max(0, boss.hp - extra);
-          player.totalDamage += extra;
-        }
-
-        this.attackCooldowns.set(sessionId, ATTACK_COOLDOWN);
-
-        if (boss.hp <= 0 && this.state.gameState === 'BOSS_BATTLE') {
-          this.startPostBossSelection();
-        }
+        this.attackCooldowns.set(sessionId, attackCooldown);
+        if (this.state.boss.hp <= 0 && this.state.gameState === 'BOSS_BATTLE') this.startPostBossSelection();
         continue;
       }
 
-      // SURVIVAL_PHASE: find nearest enemy within effective range
+      // ===================== SURVIVAL PHASE =====================
+      // Find nearest enemy using the longest weapon range across all equipped slots
+      const weaponSearchRange = (wid: string, lv: number) =>
+        wid === 'WAND' ? 380 + lv * 20 : wid === 'SPEAR' ? 280 + lv * 30 : wid === 'SWORD' ? 150 + lv * 20 : stats.attackRange;
+      const w1SearchRange = weapon ? weaponSearchRange(weapon, wLv) : 0;
+      const w2SearchRange = player.weapon2Id ? weaponSearchRange(player.weapon2Id, player.weapon2Level) : 0;
+      const w3SearchRange = player.weapon3Id ? weaponSearchRange(player.weapon3Id, player.weapon3Level) : 0;
+      const SEARCH_RANGE = Math.max(w1SearchRange, w2SearchRange, w3SearchRange);
+
       let nearestId: string | null = null;
       let nearestDist = Infinity;
       for (const [id, enemy] of this.state.enemies) {
         const dx = enemy.x - player.x;
         const dy = enemy.y - player.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < stats.attackRange && dist < nearestDist) {
-          nearestDist = dist;
-          nearestId = id;
-        }
+        if (dist < SEARCH_RANGE && dist < nearestDist) { nearestDist = dist; nearestId = id; }
       }
-
       if (!nearestId) continue;
 
-      const target = this.state.enemies.get(nearestId)!;
-      target.hp -= attackDamage;
-      player.totalDamage += attackDamage;  // 13.1
-      this.attackCooldowns.set(sessionId, ATTACK_COOLDOWN);
+      const nearestEnemy = this.state.enemies.get(nearestId)!;
+      const aimAngle = Math.atan2(nearestEnemy.y - player.y, nearestEnemy.x - player.x);
 
-      // LIFESTEAL: restore 20% of damage dealt as HP
-      if (skills.includes('LIFESTEAL')) {
-        this.restoreHp(sessionId, Math.round(attackDamage * 0.2));
+      const firedW1 = this.fireWeaponAtEnemies(sessionId, player, weapon, wLv, attackDamage, multiStrikeLv, stats, nearestId, nearestEnemy, aimAngle);
+      const firedW2 = player.weapon2Id
+        ? this.fireWeaponAtEnemies(sessionId, player, player.weapon2Id, player.weapon2Level, attackDamage, 0, stats, nearestId, nearestEnemy, aimAngle)
+        : false;
+      const firedW3 = player.weapon3Id
+        ? this.fireWeaponAtEnemies(sessionId, player, player.weapon3Id, player.weapon3Level, attackDamage, 0, stats, nearestId, nearestEnemy, aimAngle)
+        : false;
+      if (!firedW1 && !firedW2 && !firedW3) continue;
+
+      this.attackCooldowns.set(sessionId, attackCooldown);
+    }
+  }
+
+  /** Fire a single weapon pattern at the boss. Returns true if weapon was in range and fired. */
+  private fireWeaponAtBoss(
+    sessionId: string, player: PlayerSchema, weapon: string, wLv: number,
+    attackDamage: number, multiStrikeLv: number,
+    stats: { attackRange: number },
+  ): boolean {
+    const boss = this.state.boss;
+    const dx = boss.x - player.x;
+    const dy = boss.y - player.y;
+    if (weapon === 'WAND') {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 400) return false;
+      const baseAngle = Math.atan2(dy, dx);
+      const projCount = 1 + Math.floor(wLv / 2);
+      const spread = 0.22;
+      const halfSpread = ((projCount - 1) / 2) * spread;
+      for (let p = 0; p < projCount; p++) {
+        this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle - halfSpread + p * spread, attackDamage);
       }
+      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle + 0.35, Math.round(attackDamage * 0.6));
+      return true;
+    }
+    const swordRange = 150 + wLv * 20;
+    const spearRange = 300 + wLv * 30;
+    const bossRange = weapon === 'SPEAR' ? spearRange : weapon === 'SWORD' ? swordRange : stats.attackRange;
+    if (dx * dx + dy * dy > bossRange * bossRange) return false;
+    this.hitBoss(sessionId, attackDamage);
+    if (multiStrikeLv > 0) this.hitBoss(sessionId, Math.round(attackDamage * (0.3 + multiStrikeLv * 0.2)));
+    return true;
+  }
 
-      // MULTI_STRIKE: hit a second random enemy for half damage
-      if (skills.includes('MULTI_STRIKE')) {
-        for (const [id2, enemy2] of this.state.enemies) {
-          if (id2 === nearestId) continue;
-          const dx2 = enemy2.x - player.x;
-          const dy2 = enemy2.y - player.y;
-          if (Math.sqrt(dx2 * dx2 + dy2 * dy2) < stats.attackRange) {
-            enemy2.hp -= Math.round(attackDamage * 0.5);
-            player.totalDamage += Math.round(attackDamage * 0.5);
-            if (enemy2.hp <= 0) {
-              player.killCount += 1;
-              this.state.enemies.delete(id2);
-              this.grantXp(sessionId, enemy2.type === 'elite' ? 50 : 30);
-            }
-            break;  // only one extra target
-          }
-        }
+  /** Fire a single weapon pattern at enemies. Returns true if weapon was in range and fired. */
+  private fireWeaponAtEnemies(
+    sessionId: string, player: PlayerSchema, weapon: string, wLv: number,
+    attackDamage: number, multiStrikeLv: number,
+    stats: { attackRange: number },
+    nearestId: string, nearestEnemy: EnemySchema, aimAngle: number,
+  ): boolean {
+    if (weapon === 'WAND') {
+      const wRange = 380 + wLv * 20;
+      const dx = nearestEnemy.x - player.x;
+      const dy = nearestEnemy.y - player.y;
+      if (dx * dx + dy * dy > wRange * wRange) return false;
+      const projCount = 1 + Math.floor(wLv / 2);
+      const spread = 0.22;
+      const halfSpread = ((projCount - 1) / 2) * spread;
+      for (let p = 0; p < projCount; p++) {
+        this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle - halfSpread + p * spread, attackDamage);
       }
+      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle + 0.35, Math.round(attackDamage * 0.6));
+      return true;
+    }
+    if (weapon === 'SWORD') {
+      const sRange = 150 + wLv * 20;
+      const arcHalf = ((Math.PI / 3) + wLv * (Math.PI / 18)) * (1 + multiStrikeLv * 0.25);
+      let fired = false;
+      for (const [id, enemy] of this.state.enemies) {
+        const dx = enemy.x - player.x;
+        const dy = enemy.y - player.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > sRange) continue;
+        let diff = Math.atan2(dy, dx) - aimAngle;
+        while (diff >  Math.PI) diff -= 2 * Math.PI;
+        while (diff < -Math.PI) diff += 2 * Math.PI;
+        if (Math.abs(diff) <= arcHalf) { this.hitEnemy(sessionId, id, attackDamage, aimAngle); fired = true; }
+      }
+      return fired;
+    }
+    if (weapon === 'SPEAR') {
+      const sRange = 280 + wLv * 30;
+      const halfWidth = 25 + wLv * 5 + multiStrikeLv * 10;
+      const cosA = Math.cos(aimAngle);
+      const sinA = Math.sin(aimAngle);
+      let fired = false;
+      for (const [id, enemy] of this.state.enemies) {
+        const dx = enemy.x - player.x;
+        const dy = enemy.y - player.y;
+        const along = dx * cosA + dy * sinA;
+        const perp  = Math.abs(-dx * sinA + dy * cosA);
+        if (along > 0 && along <= sRange && perp <= halfWidth) { this.hitEnemy(sessionId, id, attackDamage, aimAngle); fired = true; }
+      }
+      return fired;
+    }
+    // Default (no weapon): single-target melee
+    const dx = nearestEnemy.x - player.x;
+    const dy = nearestEnemy.y - player.y;
+    if (dx * dx + dy * dy > stats.attackRange * stats.attackRange) return false;
+    this.hitEnemy(sessionId, nearestId, attackDamage, aimAngle);
+    if (multiStrikeLv > 0) {
+      let secondId: string | null = null;
+      let secondDist = Infinity;
+      for (const [id, enemy] of this.state.enemies) {
+        if (id === nearestId) continue;
+        const ex = enemy.x - player.x;
+        const ey = enemy.y - player.y;
+        const dist = Math.sqrt(ex * ex + ey * ey);
+        if (dist < stats.attackRange && dist < secondDist) { secondDist = dist; secondId = id; }
+      }
+      if (secondId) this.hitEnemy(sessionId, secondId, Math.round(attackDamage * (0.3 + multiStrikeLv * 0.2)), aimAngle);
+    }
+    return true;
+  }
 
-      if (target.hp <= 0) {
-        player.killCount += 1;  // 13.1
-        const xpReward = target.type === 'elite' ? 50 : 30;
-        const hpRestore = target.type === 'elite' ? 10 : 3;
-        const wasElite  = target.type === 'elite';
-        this.state.enemies.delete(nearestId);
-        this.attackCooldowns.delete(nearestId);
-        this.grantXp(sessionId, xpReward);
-        this.restoreHp(sessionId, hpRestore);
-        // Respawn a basic enemy after 8s to maintain pressure (elite: no respawn, it has its own timer)
-        if (!wasElite && this.state.gameState === 'SURVIVAL_PHASE') {
-          this.clock.setTimeout(() => {
-            if (this.state.gameState !== 'SURVIVAL_PHASE') return;
-            const node = GameRoom.SPAWN_NODES[Math.floor(Math.random() * GameRoom.SPAWN_NODES.length)]!;
-            const e = new EnemySchema();
-            e.id = crypto.randomUUID();
-            e.type = 'basic';
-            e.x = node.x; e.y = node.y;
-            e.maxHp = 50; e.hp = 50;
-            this.state.enemies.set(e.id, e);
-          }, 8_000);
-        }
+  /** Deals damage to a single enemy and handles kill/XP/respawn logic. */
+  private hitEnemy(sessionId: string, enemyId: string, damage: number, _aimAngle: number): void {
+    const player = this.state.players.get(sessionId);
+    const enemy  = this.state.enemies.get(enemyId);
+    if (!player || !enemy) return;
+
+    enemy.hp          -= damage;
+    player.totalDamage += damage;
+    if (this.getSkillLevel(player, 'LIFESTEAL') > 0) this.restoreHp(sessionId, Math.round(damage * 0.2));
+
+    if (enemy.hp <= 0) {
+      player.killCount += 1;
+      const wasElite = enemy.type === 'elite';
+      this.state.enemies.delete(enemyId);
+      this.attackCooldowns.delete(enemyId);
+      this.shareKillXp(sessionId, wasElite ? 50 : 30);
+      this.restoreHp(sessionId, wasElite ? 10 : 3);
+      if (!wasElite && this.state.gameState === 'SURVIVAL_PHASE') {
+        const respawnHp = 180 + (this.state.currentRound - 1) * 40;
+        this.clock.setTimeout(() => {
+          if (this.state.gameState !== 'SURVIVAL_PHASE') return;
+          const pos = GameRoom.randomEdgeSpawn();
+          const e = new EnemySchema();
+          e.id = crypto.randomUUID(); e.type = 'basic';
+          e.x = pos.x; e.y = pos.y; e.maxHp = respawnHp; e.hp = respawnHp;
+          this.state.enemies.set(e.id, e);
+        }, 8_000);
       }
     }
+  }
+
+  /** Deals damage to the boss and handles lifesteal. */
+  private hitBoss(sessionId: string, damage: number): void {
+    const player = this.state.players.get(sessionId);
+    const boss   = this.state.boss;
+    if (!player || !boss.id || boss.hp <= 0) return;
+    boss.hp = Math.max(0, boss.hp - damage);
+    player.totalDamage += damage;
+    this.grantXp(sessionId, Math.max(1, Math.floor(damage * 0.2)));
+    if (this.getSkillLevel(player, 'LIFESTEAL') > 0) this.restoreHp(sessionId, Math.round(damage * 0.2));
+  }
+
+  /** Fires a player-owned projectile (WAND). Tracked in playerProjectileIds for collision. */
+  private firePlayerProjectile(sessionId: string, x: number, y: number, angle: number, damage: number): void {
+    const proj = new ProjectileSchema();
+    proj.id      = crypto.randomUUID();
+    proj.ownerId = sessionId;
+    proj.x       = x;
+    proj.y       = y;
+    proj.angle   = angle;
+    proj.vx      = Math.cos(angle) * 320;
+    proj.vy      = Math.sin(angle) * 320;
+    proj.damage  = damage;
+    this.state.projectiles.set(proj.id, proj);
+    this.playerProjectileIds.add(proj.id);
   }
 
   /** 8.4: TEAM_HEAL ticks HP onto nearby teammates; AURA is applied per-hit in processAutoAttack. */
@@ -1270,8 +1785,18 @@ export class GameRoom extends Room<LobbyState> {
   }
 
   private applyClassStats(): void {
+    const CLASS_STARTING_WEAPON: Record<string, string> = {
+      TANK:    'SWORD',
+      DAMAGE:  'SPEAR',
+      SUPPORT: 'WAND',
+    };
     for (const [, player] of this.state.players) {
-      const stats = this.getEffectiveStats(player);  // 9.4: equipment is empty at start, same as base
+      // Grant starting weapon based on class (slot 1, level 0)
+      if (!player.weaponId) {
+        player.weaponId    = CLASS_STARTING_WEAPON[player.selectedClass] ?? 'SWORD';
+        player.weaponLevel = 0;
+      }
+      const stats = this.getEffectiveStats(player);
       player.maxHp = stats.maxHp;
       player.hp    = stats.maxHp;
     }
@@ -1500,6 +2025,10 @@ export class GameRoom extends Room<LobbyState> {
       player.skillIds.splice(0, player.skillIds.length);
       player.weaponId = '';
       player.weaponLevel = 0;
+      player.weapon2Id = '';
+      player.weapon2Level = 0;
+      player.weapon3Id = '';
+      player.weapon3Level = 0;
       player.passiveIds.splice(0, player.passiveIds.length);
       player.passiveLevels.splice(0, player.passiveLevels.length);
       player.isDown = false;
