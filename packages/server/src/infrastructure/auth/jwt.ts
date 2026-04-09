@@ -1,4 +1,5 @@
-import { verify } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
+const { verify } = jwt;
 import type { Request, Response, NextFunction } from 'express';
 
 export interface AuthPayload {

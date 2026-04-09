@@ -13,7 +13,7 @@ const login = new LoginUseCase(players);
 const guestLogin = new GuestLoginUseCase();
 
 authRouter.post('/register', async (req: Request, res: Response) => {
-  const { username, password } = req.body as { username?: string; password?: string };
+  const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
 
   if (typeof username !== 'string' || typeof password !== 'string') {
     res.status(400).json({ error: 'INVALID_REQUEST' });
@@ -39,7 +39,7 @@ authRouter.post('/register', async (req: Request, res: Response) => {
 });
 
 authRouter.post('/login', async (req: Request, res: Response) => {
-  const { username, password } = req.body as { username?: string; password?: string };
+  const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
 
   if (typeof username !== 'string' || typeof password !== 'string') {
     res.status(400).json({ error: 'INVALID_REQUEST' });
@@ -59,7 +59,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 });
 
 authRouter.post('/guest', (req: Request, res: Response) => {
-  const { displayName } = req.body as { displayName?: string };
+  const { displayName } = (req.body ?? {}) as { displayName?: string };
 
   if (typeof displayName !== 'string') {
     res.status(400).json({ error: 'INVALID_REQUEST' });

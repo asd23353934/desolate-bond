@@ -64,69 +64,69 @@
 - [x] 8.1 定義 Three distinct classes are available with different base stats：坦克（高 HP）、輸出（高攻擊）、輔助（均衡+治療加成）基礎數值
 - [x] 8.2 實作 Each class has a dedicated skill pool 與 A shared common skill pool is accessible by all classes：職業專屬池 + 共通池資料結構
 - [x] 8.3 實作 level up 技能抽選邏輯：從職業池 + 共通池組合抽出 3 個選項
-- [ ] 8.4 實作 Cooperative skills enable class interactions：輔助協作技能可觸發對附近隊友（含 Bot）的效果
-- [ ] 8.5 實作 Class is locked for the entire run after game start：遊戲開始後拒絕任何職業更換請求
+- [x] 8.4 實作 Cooperative skills enable class interactions：輔助協作技能可觸發對附近隊友（含 Bot）的效果
+- [x] 8.5 實作 Class is locked for the entire run after game start：遊戲開始後拒絕任何職業更換請求
 
 ## 9. 裝備系統（equipment-system）
 
-- [ ] 9.1 定義 Each player can hold one weapon and up to four passive items 資料結構：武器 1 格、被動道具 4 格
-- [ ] 9.2 實作 Equipment is picked up by walking over it：玩家碰撞到物品 hitbox 自動拾取，武器替換舊武器，被動道具滿則不拾取
-- [ ] 9.3 實作 Upgrade stones automatically upgrade the player's strongest item：撿到強化石時自動提升最高等級裝備，同等級取最低 index
-- [ ] 9.4 實作 Equipped items affect player stats and behavior：裝備/替換時即時更新玩家有效屬性
-- [ ] 9.5 確認 Items are not shareable between players：UI 與輸入映射中不提供任何轉移物品操作
+- [x] 9.1 定義 Each player can hold one weapon and up to four passive items 資料結構：武器 1 格、被動道具 4 格
+- [x] 9.2 實作 Equipment is picked up by walking over it：玩家碰撞到物品 hitbox 自動拾取，武器替換舊武器，被動道具滿則不拾取
+- [x] 9.3 實作 Upgrade stones automatically upgrade the player's strongest item：撿到強化石時自動提升最高等級裝備，同等級取最低 index
+- [x] 9.4 實作 Equipped items affect player stats and behavior：裝備/替換時即時更新玩家有效屬性
+- [x] 9.5 確認 Items are not shareable between players：UI 與輸入映射中不提供任何轉移物品操作
 
 ## 10. Boss 戰系統（boss-battle）
 
-- [ ] 10.1 定義 Each round features a unique Boss with distinct behavior：3 個 Boss 的攻擊模式、移動行為、外觀素材資料
-- [ ] 10.2 實作 Boss enters a frenzied second phase at 50% HP：HP 降至 50% 觸發 phase-change 事件，更新至 phase 2 行為
-- [ ] 10.3 實作 Pre-boss selection pauses progression for skill selection：PRE_BOSS_SELECTION UI，全員選技能，30 秒倒數自動隨機選
-- [ ] 10.4 實作 Post-boss reward selection pauses progression：POST_BOSS_SELECTION UI（3 選 1），30 秒倒數自動隨機選
-- [ ] 10.5 實作 Boss HP and damage scale linearly with player count（依 multiplayer-sync 規格公式計算）
-- [ ] 10.6 實作 Players attack the Boss automatically：玩家自動攻擊 Boss，無友傷
+- [x] 10.1 定義 Each round features a unique Boss with distinct behavior：3 個 Boss 的攻擊模式、移動行為、外觀素材資料
+- [x] 10.2 實作 Boss enters a frenzied second phase at 50% HP：HP 降至 50% 觸發 phase-change 事件，更新至 phase 2 行為
+- [x] 10.3 實作 Pre-boss selection pauses progression for skill selection：PRE_BOSS_SELECTION UI，全員選技能，30 秒倒數自動隨機選
+- [x] 10.4 實作 Post-boss reward selection pauses progression：POST_BOSS_SELECTION UI（3 選 1），30 秒倒數自動隨機選
+- [x] 10.5 實作 Boss HP and damage scale linearly with player count（依 multiplayer-sync 規格公式計算）
+- [x] 10.6 實作 Players attack the Boss automatically：玩家自動攻擊 Boss，無友傷
 
 ## 11. Bot AI（bot-ai）
 
-- [ ] 11.1 實作 Bot AI 架構 BotController，Bot uses the same input interface as human players：每 tick 產生 PlayerInput，遊戲邏輯不區分 Bot 與真人
-- [ ] 11.2 實作 Bot navigates toward enemies and avoids obstacles：CHASE_ENEMY 狀態，移動至最近敵人並繞過障礙物
-- [ ] 11.3 實作 Bot dodges Boss projectiles and area attacks：DODGE 狀態，偵測投射物進入閾值半徑時移動至垂直逃脫方向
-- [ ] 11.4 實作 Bot rescues downed teammates：RESCUE 狀態，導航至倒地玩家並在到達時觸發救援動作
-- [ ] 11.5 實作 Bot activates cooperative skills when conditions are met：條件達成時（隊友在範圍內）自動觸發協作技能
-- [ ] 11.6 實作 Bot selects skills and rewards automatically：選擇事件觸發時立即隨機選擇一個選項
+- [x] 11.1 實作 Bot AI 架構 BotController，Bot uses the same input interface as human players：每 tick 產生 PlayerInput，遊戲邏輯不區分 Bot 與真人
+- [x] 11.2 實作 Bot navigates toward enemies and avoids obstacles：CHASE_ENEMY 狀態，移動至最近敵人並繞過障礙物
+- [x] 11.3 實作 Bot dodges Boss projectiles and area attacks：DODGE 狀態，偵測投射物進入閾值半徑時移動至垂直逃脫方向
+- [x] 11.4 實作 Bot rescues downed teammates：RESCUE 狀態，導航至倒地玩家並在到達時觸發救援動作
+- [x] 11.5 實作 Bot activates cooperative skills when conditions are met：條件達成時（隊友在範圍內）自動觸發協作技能
+- [x] 11.6 實作 Bot selects skills and rewards automatically：選擇事件觸發時立即隨機選擇一個選項
 
 ## 12. 玩家生命週期（player-lifecycle）
 
-- [ ] 12.1 實作 Player enters downed state when HP reaches zero：HP 歸零時伺服器轉換至 DOWNED，停止移動與攻擊
-- [ ] 12.2 實作 Downed player can send a rescue ping：倒地玩家發送求救信號，所有隊友螢幕顯示 3 秒位置指示器
-- [ ] 12.3 實作 Active teammate can rescue a downed player：重疊 hitbox 並持續按住救援鍵後復活，受傷則取消
-- [ ] 12.4 實作 Downed player can observe teammates' views while waiting：倒地玩家可按鍵切換跟隨不同隊友視角
-- [ ] 12.5 確認 No friendly fire between players：攻擊 hitbox 對隊友不計算傷害
+- [x] 12.1 實作 Player enters downed state when HP reaches zero：HP 歸零時伺服器轉換至 DOWNED，停止移動與攻擊
+- [x] 12.2 實作 Downed player can send a rescue ping：倒地玩家發送求救信號，所有隊友螢幕顯示 3 秒位置指示器
+- [x] 12.3 實作 Active teammate can rescue a downed player：重疊 hitbox 並持續按住救援鍵後復活，受傷則取消
+- [x] 12.4 實作 Downed player can observe teammates' views while waiting：倒地玩家可按鍵切換跟隨不同隊友視角
+- [x] 12.5 確認 No friendly fire between players：攻擊 hitbox 對隊友不計算傷害
 
 ## 13. 統計與排行榜（stats-leaderboard）
 
-- [ ] 13.1 實作 Player stats are tracked throughout each run：追蹤總傷害、承傷、擊殺數、倒地次數、救援次數、存活時間
-- [ ] 13.2 實作 Run result is persisted to the database after each session：RESULT 狀態時批次寫入 player_results
-- [ ] 13.3 實作 Multiple leaderboard categories are available：最快通關時間、最高傷害、最高存活時間三個獨立排行榜 API
-- [ ] 13.4 實作 Guest entries appear on leaderboards with a guest marker：訪客條目顯示 guest indicator
-- [ ] 13.5 實作 Results screen displays per-player stats after each run：結算畫面顯示所有玩家本局數據與最終回合數
-- [ ] 13.6 建立排行榜 UI（React + shadcn/ui）
+- [x] 13.1 實作 Player stats are tracked throughout each run：追蹤總傷害、承傷、擊殺數、倒地次數、救援次數、存活時間
+- [x] 13.2 實作 Run result is persisted to the database after each session：RESULT 狀態時批次寫入 player_results
+- [x] 13.3 實作 Multiple leaderboard categories are available：最快通關時間、最高傷害、最高存活時間三個獨立排行榜 API
+- [x] 13.4 實作 Guest entries appear on leaderboards with a guest marker：訪客條目顯示 guest indicator
+- [x] 13.5 實作 Results screen displays per-player stats after each run：結算畫面顯示所有玩家本局數據與最終回合數
+- [x] 13.6 建立排行榜 UI（React + shadcn/ui）
 
 ## 14. 遊戲設定（game-settings）
 
-- [ ] 14.1 實作 Player can adjust master volume：主音量 slider 即時影響輸出，設定持久化（帳號/session）
-- [ ] 14.2 實作 Player can toggle floating damage numbers：預設 ON，切換後立即生效，設定持久化
-- [ ] 14.3 實作 Player can select a graphics quality preset（高/中/低）：低畫質減少粒子特效並停用陰影
-- [ ] 14.4 實作 Player can remap keyboard keys：可重新指定移動鍵與救援鍵，重複 binding 時顯示衝突警告並拒絕儲存
+- [x] 14.1 實作 Player can adjust master volume：主音量 slider 即時影響輸出，設定持久化（帳號/session）
+- [x] 14.2 實作 Player can toggle floating damage numbers：預設 ON，切換後立即生效，設定持久化
+- [x] 14.3 實作 Player can select a graphics quality preset（高/中/低）：低畫質減少粒子特效並停用陰影
+- [x] 14.4 實作 Player can remap keyboard keys：可重新指定移動鍵與救援鍵，重複 binding 時顯示衝突警告並拒絕儲存
 
 ## 15. 視覺與音效整合
 
-- [ ] 15.1 匯入 Kenney.nl Tiny Dungeon 素材（角色、怪物 Sprite）至 Phaser 資源管理
-- [ ] 15.2 匯入 Kenney.nl Tiny Town Tileset 並設定強化期地圖
-- [ ] 15.3 匯入 Kenney.nl UI Pack 並套用至遊戲內 HUD（血條、技能欄、計時器）
-- [ ] 15.4 整合 OpenGameArt 攻擊特效與升級特效至對應遊戲事件
-- [ ] 15.5 整合 Freesound 音效（攻擊、受傷、升級、救援）至對應遊戲事件
-- [ ] 15.6 整合 OpenGameArt BGM：強化期一首、Boss 戰一首，循環播放
+- [x] 15.1 匯入 Kenney.nl Tiny Dungeon 素材（角色、怪物 Sprite）至 Phaser 資源管理
+- [x] 15.2 匯入 Kenney.nl Tiny Town Tileset 並設定強化期地圖
+- [x] 15.3 匯入 Kenney.nl UI Pack 並套用至遊戲內 HUD（血條、技能欄、計時器）
+- [x] 15.4 整合 OpenGameArt 攻擊特效與升級特效至對應遊戲事件
+- [x] 15.5 整合 Freesound 音效（攻擊、受傷、升級、救援）至對應遊戲事件
+- [x] 15.6 整合 OpenGameArt BGM：強化期一首、Boss 戰一首，循環播放
 
 ## 16. 操作說明頁面
 
-- [ ] 16.1 建立靜態操作說明頁面（React），涵蓋移動、自動攻擊、技能選擇、救援、設定說明
-- [ ] 16.2 在主選單加入「操作說明」入口連結
+- [x] 16.1 建立靜態操作說明頁面（React），涵蓋移動、自動攻擊、技能選擇、救援、設定說明
+- [x] 16.2 在主選單加入「操作說明」入口連結

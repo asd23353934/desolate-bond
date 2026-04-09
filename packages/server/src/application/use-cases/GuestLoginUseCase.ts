@@ -1,4 +1,5 @@
-import { sign } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
+const { sign } = jwt;
 
 export interface GuestLoginResult {
   token: string;

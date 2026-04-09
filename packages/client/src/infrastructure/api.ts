@@ -1,5 +1,12 @@
 const BASE = import.meta.env['VITE_API_URL'] ?? 'http://localhost:2567';
 
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`);
+  const data = await res.json() as T & { error?: string };
+  if (!res.ok) throw new Error((data as { error?: string }).error ?? 'REQUEST_FAILED');
+  return data;
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
@@ -27,4 +34,21 @@ export const api = {
     if (!res.ok) throw new Error(data.error ?? 'ROOM_NOT_FOUND');
     return data.roomId!;
   },
+
+  // 13.3/13.6: Leaderboard endpoints
+  leaderboardFastestClear: () =>
+    get<LeaderboardEntry[]>('/leaderboard/fastest-clear'),
+  leaderboardHighestDamage: () =>
+    get<LeaderboardEntry[]>('/leaderboard/highest-damage'),
+  leaderboardHighestSurvival: () =>
+    get<LeaderboardEntry[]>('/leaderboard/highest-survival'),
 };
+
+export interface LeaderboardEntry {
+  display_name: string;
+  is_guest: boolean;
+  player_class: string;
+  total_damage: number;
+  survival_time: number;
+  clear_time: number | null;
+}

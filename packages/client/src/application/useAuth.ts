@@ -10,10 +10,25 @@ export interface AuthUser {
 
 const SESSION_KEY = 'db_auth';
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]!));
+    return typeof payload.exp === 'number' && payload.exp * 1000 < Date.now();
+  } catch {
+    return true;
+  }
+}
+
 function loadSession(): AuthUser | null {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as AuthUser) : null;
+    if (!raw) return null;
+    const user = JSON.parse(raw) as AuthUser;
+    if (isTokenExpired(user.token)) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return user;
   } catch {
     return null;
   }

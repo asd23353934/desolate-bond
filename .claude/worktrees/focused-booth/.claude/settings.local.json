@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Remove-Item -Recurse -Force 'C:\\\\Users\\\\user\\\\Desktop\\\\gitlab\\\\desolate-bond\\\\.claude\\\\worktrees\\\\focused-booth'\")",
+      "Bash(git -C \"C:\\\\Users\\\\user\\\\Desktop\\\\gitlab\\\\desolate-bond\" worktree prune)"
+    ]
+  }
+}

@@ -1,4 +1,5 @@
-import { verify } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
+const { verify } = jwt;
 import type { AuthPayload } from './jwt.js';
 
 export function verifyToken(token: string): AuthPayload {

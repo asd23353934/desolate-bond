@@ -4,14 +4,18 @@ interface SkillSelectionOverlayProps {
   level: number;
   options: string[];
   onSelect: (skillId: string) => void;
+  isPreBoss?: boolean;
 }
 
-export function SkillSelectionOverlay({ level, options, onSelect }: SkillSelectionOverlayProps) {
+export function SkillSelectionOverlay({ level, options, onSelect, isPreBoss }: SkillSelectionOverlayProps) {
   return (
     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
       <div className="pointer-events-auto bg-black/80 border border-yellow-500 rounded-xl p-6 w-[480px] text-white">
-        <h2 className="text-xl font-bold text-yellow-400 mb-1 text-center">升等！Level {level}</h2>
-        <p className="text-sm text-gray-400 mb-4 text-center">選擇一個技能（遊戲繼續進行中）</p>
+        {isPreBoss
+          ? <h2 className="text-xl font-bold text-red-400 mb-1 text-center">Boss 即將出現！</h2>
+          : <h2 className="text-xl font-bold text-yellow-400 mb-1 text-center">升等！Level {level}</h2>
+        }
+        <p className="text-sm text-gray-400 mb-4 text-center">選擇一個技能強化自己</p>
         <div className="flex flex-col gap-3">
           {options.map((id) => {
             const def = SKILL_DEFS[id];

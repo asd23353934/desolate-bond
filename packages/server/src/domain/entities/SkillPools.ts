@@ -20,3 +20,16 @@ export const ALL_SKILL_IDS = new Set([
   ...Object.values(CLASS_SKILL_POOLS).flat(),
   ...COMMON_SKILL_POOL,
 ]);
+
+export interface CoopSkillDef {
+  range: number;        // pixels
+  effect: 'HEAL_TICK' | 'ATTACK_BOOST';
+  value: number;        // HP per trigger, or attack multiplier
+  cooldownMs?: number;  // required for HEAL_TICK
+}
+
+/** Support class cooperative skills that affect nearby teammates (including Bots). */
+export const COOPERATIVE_SKILLS: Record<string, CoopSkillDef> = {
+  TEAM_HEAL: { range: 150, effect: 'HEAL_TICK',    value: 1,    cooldownMs: 1_000 },
+  AURA:      { range: 150, effect: 'ATTACK_BOOST', value: 1.10 },
+};

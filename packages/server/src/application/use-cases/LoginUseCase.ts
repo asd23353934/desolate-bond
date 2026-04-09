@@ -1,5 +1,6 @@
 import { compare } from 'bcryptjs';
-import { sign } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
+const { sign } = jwt;
 import type { IPlayerRepository } from '../../domain/interfaces/IPlayerRepository.js';
 
 export interface LoginResult {

@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: desolate_bond
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  pgweb:
+    image: sosedoff/pgweb
+    environment:
+      DATABASE_URL: postgresql://dev:dev@db:5432/desolate_bond?sslmode=disable
+    ports:
+      - "8080:8081"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
