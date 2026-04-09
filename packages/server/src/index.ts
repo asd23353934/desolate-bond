@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
+import { networkInterfaces } from 'os';
 import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { runMigrations, MIGRATIONS } from './infrastructure/migrate.js';
@@ -13,10 +14,22 @@ const port = Number(process.env['PORT'] ?? 2567);
 
 const app = express();
 
-const allowedOrigins = (process.env['CORS_ORIGINS'] ?? 'http://localhost:5173').split(',');
+const clientPort = process.env['CLIENT_PORT'] ?? '5173';
+const allowedOrigins = new Set(
+  (process.env['CORS_ORIGINS'] ?? `http://localhost:${clientPort}`).split(',')
+);
+// 自動允許本機所有 IPv4 的 client port
+for (const ifaces of Object.values(networkInterfaces())) {
+  for (const iface of ifaces ?? []) {
+    if (iface.family === 'IPv4' && !iface.internal) {
+      allowedOrigins.add(`http://${iface.address}:${clientPort}`);
+    }
+  }
+}
+
 app.use((req, res, next) => {
   const origin = req.headers['origin'];
-  if (origin && allowedOrigins.includes(origin)) {
+  if (origin && allowedOrigins.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -30,6 +43,18 @@ app.use('/auth', authRouter);
 app.use('/rooms', roomsRouter);
 app.use('/leaderboard', leaderboardRouter);
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+app.get('/network-info', (_req, res) => {
+  const ipv4: string[] = [];
+  for (const ifaces of Object.values(networkInterfaces())) {
+    for (const iface of ifaces ?? []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        ipv4.push(iface.address);
+      }
+    }
+  }
+  res.json({ ipv4 });
+});
 
 const httpServer = createServer(app);
 

@@ -25,3 +25,69 @@ discuss? → propose → apply ⇄ ingest → archive
 Changes can be parked（暫存）— temporarily moved out of `openspec/changes/`. Parked changes won't appear in `spectra list` but can be found with `spectra list --parked`. To restore: `spectra unpark <name>`. The `/spectra:apply` and `/spectra:ingest` skills handle parked changes automatically.
 
 <!-- SPECTRA:END -->
+
+---
+
+# Project: 絕境同盟（Desolate Bond）
+
+網頁多人 Roguelite 倖存者遊戲，2–4 人合作通關三個 Boss 關卡。
+
+## Tech Stack
+
+- **Frontend**: React 19 + Phaser 3 + Tailwind CSS v4 + shadcn/ui（Vite）
+- **Backend**: Node.js + Express 5 + Colyseus 0.16（WebSocket）
+- **Database**: PostgreSQL（本機 Docker；正式環境 Neon）
+- **Language**: TypeScript（全端）
+- **Monorepo**: npm workspaces（`packages/client`、`packages/server`）
+
+## Dev Commands
+
+```bash
+# 啟動全端開發（concurrently）
+npm run dev
+
+# 單獨啟動
+npm run dev:client   # Vite dev server
+npm run dev:server   # tsx watch
+
+# 本機資料庫（Docker）
+docker compose up -d       # 啟動 PostgreSQL + pgweb
+docker compose down        # 關閉
+# pgweb UI: http://localhost:8080
+
+# 建置
+npm run build
+```
+
+## Architecture
+
+採用 Clean Architecture 分層，遊戲邏輯與框架完全解耦：
+
+```
+Presentation  ← Phaser 3 Scene / React Component（渲染與輸入）
+Application   ← Use Cases / Game Commands（協調 domain 物件）
+Domain        ← 純 TypeScript：Player, Boss, Skill, Room（無框架依賴）
+Infrastructure ← Colyseus Room / Neon DB / QRCode（實作介面）
+```
+
+## Key Design Decisions
+
+- **Server-Authoritative**：伺服器持有唯一遊戲狀態，客戶端只送輸入
+- **Colyseus Schema delta 同步**：每 tick（60ms）只廣播變化欄位
+- **Bot AI** 與真人共用 `PlayerInput` 介面，伺服器端 `BotController` 每 tick 產生輸入
+- **遊戲狀態機**：`LOBBY → SURVIVAL_PHASE → PRE_BOSS_SELECTION → BOSS_BATTLE → POST_BOSS_SELECTION → RESULT`
+- **QR Code 進房**：客戶端生成，掃描後直接帶入房間碼
+
+## Database Schema
+
+```sql
+users (id, username, password_hash, is_guest, created_at)
+game_sessions (id, room_id, started_at, ended_at, boss_count, player_count)
+player_results (id, session_id, user_id, class, total_damage, survival_time, cleared, rank_score)
+```
+
+## Deployment
+
+- **Frontend**: Cloudflare Pages
+- **Backend**: Railway
+- **Database**: Neon（serverless PostgreSQL）

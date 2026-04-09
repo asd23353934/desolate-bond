@@ -21,8 +21,9 @@ const CLASS_LABELS: Record<string, string> = {
 
 const CLASSES = ['TANK', 'DAMAGE', 'SUPPORT'] as const;
 
-export function LobbyPage({ room, roomCode, user, onLeave, onGameStart }: LobbyPageProps) {
+export function LobbyPage({ room, roomCode: _roomCode, user, onLeave, onGameStart }: LobbyPageProps) {
   const lobby = useLobbyState(room);
+  const roomCode = lobby.roomCode || _roomCode;
   const me = lobby.players.find((p) => p.id === user.id);
   const isHost = me?.isHost ?? false;
   const [startError, setStartError] = useState<string[]>([]);

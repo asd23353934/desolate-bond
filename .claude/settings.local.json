@@ -135,7 +135,10 @@
       "Bash(cmd /c \"cd C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond && npx tsc -p packages/server/tsconfig.json --noEmit 2>&1\")",
       "Bash(cmd /c \"cd /d C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond && npx tsc -p packages/server/tsconfig.json --noEmit && echo SERVER_OK || echo SERVER_FAIL\")",
       "Bash(cmd /c \"cd /d C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond && npx tsc -p packages/server/tsconfig.json --noEmit > C:\\\\\\\\temp\\\\\\\\ts_out.txt 2>&1 && type C:\\\\\\\\temp\\\\\\\\ts_out.txt\")",
-      "Bash(powershell -Command \"Set-Location 'C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond'; npx tsc -p packages/server/tsconfig.json --noEmit 2>&1\")"
+      "Bash(powershell -Command \"Set-Location 'C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond'; npx tsc -p packages/server/tsconfig.json --noEmit 2>&1\")",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); findings=[f for f in data['findings'] if f['severity'] in ['Critical','Warning']]; print\\(f'Total findings: {len\\(findings\\)}'\\); [print\\(f\\\\\"  {f['id']} [{f['severity']}]: {f['summary']}\\\\\"\\) for f in findings]\")",
+      "Read(//c/Users/user/Downloads/**)",
+      "Bash(unzip -o b_2MKXcOYLnwy.zip -d v0_mainmenu)"
     ]
   }
 }

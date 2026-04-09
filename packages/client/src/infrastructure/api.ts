@@ -1,4 +1,4 @@
-const BASE = import.meta.env['VITE_API_URL'] ?? 'http://localhost:2567';
+const BASE = import.meta.env['VITE_API_URL'] ?? `http://${window.location.hostname}:2567`;
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
@@ -34,6 +34,9 @@ export const api = {
     if (!res.ok) throw new Error(data.error ?? 'ROOM_NOT_FOUND');
     return data.roomId!;
   },
+
+  networkInfo: () =>
+    get<{ ipv4: string[] }>('/network-info'),
 
   // 13.3/13.6: Leaderboard endpoints
   leaderboardFastestClear: () =>

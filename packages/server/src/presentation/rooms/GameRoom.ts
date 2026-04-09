@@ -519,9 +519,12 @@ export class GameRoom extends Room<LobbyState> {
       }
     }
 
-    // Clear progress for rescuers who stepped away
-    for (const [rescuerId] of this.rescueProgress) {
-      if (!activeRescuerIds.has(rescuerId)) this.rescueProgress.delete(rescuerId);
+    // Clear progress for rescuers who stepped away — broadcast 0 to reset client bar
+    for (const [rescuerId, prog] of this.rescueProgress) {
+      if (!activeRescuerIds.has(rescuerId)) {
+        this.broadcast('RESCUE_PROGRESS', { targetId: prog.targetId, rescuerId, progress: 0 });
+        this.rescueProgress.delete(rescuerId);
+      }
     }
   }
 
