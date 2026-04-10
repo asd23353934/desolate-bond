@@ -6,46 +6,59 @@
 
 @layer base {
   :root {
-    /* Dark Fantasy Theme */
-    --background: #0a0a0f;
-    --foreground: #f0e6d3;
-    --card: #0d0d14;
-    --card-foreground: #f0e6d3;
-    --popover: #0d0d14;
-    --popover-foreground: #f0e6d3;
-    --primary: #c9a84c;
-    --primary-foreground: #0a0a0f;
-    --secondary: #1a1a24;
-    --secondary-foreground: #f0e6d3;
-    --muted: #15151f;
-    --muted-foreground: #a09080;
-    --accent: #c9a84c;
-    --accent-foreground: #0a0a0f;
-    --destructive: #8b2020;
-    --destructive-foreground: #f0e6d3;
-    --border: #c9a84c40;
-    --input: #1a1a24;
-    --ring: #c9a84c;
-    --radius: 0.5rem;
+    /* ── Pixel RPG Color Palette ── */
+    --pixel-bg:     #0d0d1a;
+    --pixel-panel:  #1a1a2e;
+    --pixel-border: #16213e;
+    --pixel-amber:  #f4a834;
+    --pixel-teal:   #4ecdc4;
+    --pixel-red:    #e84855;
+    --pixel-green:  #44cf6c;
+    --pixel-text:   #e8e8d0;
+    --pixel-muted:  #888899;
+    --pixel-gold:   #ffe066;
 
-    /* Custom tokens */
-    --gold: #c9a84c;
-    --gold-dark: #8b6914;
-    --gold-light: #e0c878;
-    --cream: #f0e6d3;
-    --dark-bg: #0a0a0f;
-    --dark-card: #0d0d14;
+    /* ── shadcn / Tailwind semantic tokens (mapped to pixel palette) ── */
+    --background: var(--pixel-bg);
+    --foreground: var(--pixel-text);
+    --card: var(--pixel-panel);
+    --card-foreground: var(--pixel-text);
+    --popover: var(--pixel-panel);
+    --popover-foreground: var(--pixel-text);
+    --primary: var(--pixel-amber);
+    --primary-foreground: #000000;
+    --secondary: var(--pixel-teal);
+    --secondary-foreground: #000000;
+    --muted: var(--pixel-border);
+    --muted-foreground: var(--pixel-muted);
+    --accent: var(--pixel-teal);
+    --accent-foreground: #000000;
+    --destructive: var(--pixel-red);
+    --destructive-foreground: #ffffff;
+    --border: var(--pixel-border);
+    --input: var(--pixel-panel);
+    --ring: var(--pixel-amber);
+    --radius: 0px;
   }
 
   @theme inline {
-    --font-sans: 'Geist Variable', sans-serif;
-    --font-serif: 'Cinzel Decorative', 'Cinzel', serif;
-    --color-gold: var(--gold);
-    --color-gold-dark: var(--gold-dark);
-    --color-gold-light: var(--gold-light);
-    --color-cream: var(--cream);
-    --color-dark-bg: var(--dark-bg);
-    --color-dark-card: var(--dark-card);
+    --font-sans:    'Geist Variable', sans-serif;
+    --font-heading: 'Press Start 2P', monospace;
+    --font-body:    'VT323', monospace;
+
+    /* pixel color utilities */
+    --color-pixel-bg:     var(--pixel-bg);
+    --color-pixel-panel:  var(--pixel-panel);
+    --color-pixel-border: var(--pixel-border);
+    --color-pixel-amber:  var(--pixel-amber);
+    --color-pixel-teal:   var(--pixel-teal);
+    --color-pixel-red:    var(--pixel-red);
+    --color-pixel-green:  var(--pixel-green);
+    --color-pixel-text:   var(--pixel-text);
+    --color-pixel-muted:  var(--pixel-muted);
+    --color-pixel-gold:   var(--pixel-gold);
+
+    /* semantic */
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-card: var(--card);
@@ -63,21 +76,92 @@
     --color-border: var(--border);
     --color-input: var(--input);
     --color-ring: var(--ring);
-    --radius-sm: calc(var(--radius) - 4px);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) + 4px);
+
+    --radius-sm: 0px;
+    --radius-md: 0px;
+    --radius-lg: 0px;
+    --radius-xl: 0px;
   }
 
   * {
     border-color: var(--border);
     outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
+    border-radius: 0 !important;
   }
   body {
-    background-color: var(--background);
-    color: var(--foreground);
+    background-color: var(--pixel-bg);
+    color: var(--pixel-text);
+    cursor: default;
   }
   html {
     font-family: var(--font-sans, system-ui, sans-serif);
   }
+}
+
+/* ── Pixel font helpers ── */
+.font-heading { font-family: var(--font-heading); }
+.font-body    { font-family: var(--font-body); }
+
+/* ── Scanline overlay ── */
+.scanlines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.05) 2px,
+    rgba(0,0,0,0.05) 4px
+  );
+  animation: scanline-scroll 20s linear infinite;
+}
+
+/* ── Dithering pattern ── */
+.dither-bg {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 1px,
+    rgba(255,255,255,0.02) 1px,
+    rgba(255,255,255,0.02) 2px
+  );
+}
+
+/* ── Cursor blink (after panel titles) ── */
+.cursor-blink::after {
+  content: '|';
+  animation: cursor-blink 1s step-end infinite;
+  color: var(--pixel-amber);
+  margin-left: 4px;
+}
+
+/* ── Amber blink (waiting text) ── */
+.amber-blink {
+  animation: amber-blink 1.5s ease-in-out infinite;
+}
+
+/* ── Keyframes ── */
+@keyframes scanline-scroll {
+  0%   { background-position: 0 0; }
+  100% { background-position: 0 100vh; }
+}
+
+@keyframes cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@keyframes amber-blink {
+  0%, 50%   { opacity: 1; }
+  51%, 100% { opacity: 0.3; }
+}
+
+@keyframes flicker {
+  0%, 100% { opacity: 1;   }
+  40%       { opacity: 0.88; }
+  42%       { opacity: 1;   }
+  60%       { opacity: 0.92; }
+  62%       { opacity: 1;   }
 }

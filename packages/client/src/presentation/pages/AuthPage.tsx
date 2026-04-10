@@ -1,9 +1,7 @@
 import { useState } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Crown } from 'lucide-react';
+import { PixelPanel, PixelButton, PixelInput, PixelTabs, FloatingParticles } from '@/components/pixel-ui';
 
 interface AuthPageProps {
   register: (u: string, p: string) => Promise<void>;
@@ -13,9 +11,9 @@ interface AuthPageProps {
 
 function errorMessage(code: string): string {
   const map: Record<string, string> = {
-    USERNAME_TAKEN: '此帳號名稱已被使用',
-    USERNAME_INVALID: '帳號名稱需 2–32 字元',
-    PASSWORD_TOO_SHORT: '密碼至少 6 個字元',
+    USERNAME_TAKEN:    '此帳號名稱已被使用',
+    USERNAME_INVALID:  '帳號名稱需 2–32 字元',
+    PASSWORD_TOO_SHORT:'密碼至少 6 個字元',
     INVALID_CREDENTIALS: '帳號或密碼錯誤',
     DISPLAY_NAME_INVALID: '顯示名稱需 1–32 字元',
   };
@@ -23,6 +21,7 @@ function errorMessage(code: string): string {
 }
 
 export function AuthPage({ register, login, loginAsGuest }: AuthPageProps) {
+  const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -39,52 +38,114 @@ export function AuthPage({ register, login, loginAsGuest }: AuthPageProps) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle className="text-center text-2xl">絕境同盟</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="login">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="login">登入</TabsTrigger>
-              <TabsTrigger value="register">註冊</TabsTrigger>
-              <TabsTrigger value="guest">訪客</TabsTrigger>
-            </TabsList>
+    <div className="relative flex min-h-screen items-center justify-center p-4 scanlines">
+      <FloatingParticles />
 
-            <TabsContent value="login">
-              <LoginForm loading={loading} onSubmit={(u, p) => handle(() => login(u, p))} />
-            </TabsContent>
-            <TabsContent value="register">
-              <RegisterForm loading={loading} onSubmit={(u, p) => handle(() => register(u, p))} />
-            </TabsContent>
-            <TabsContent value="guest">
-              <GuestForm loading={loading} onSubmit={(name) => handle(() => loginAsGuest(name))} />
-            </TabsContent>
-          </Tabs>
+      {/* Background glow */}
+      <div className="fixed inset-0 pointer-events-none"
+        style={{ background: 'radial-gradient(circle at center, rgba(244,168,52,0.07) 0%, transparent 55%)' }} />
 
-          {error && <p className="mt-3 text-center text-sm text-destructive">{error}</p>}
-        </CardContent>
-      </Card>
+      {/* Card entrance */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="relative w-full max-w-[400px] z-10"
+      >
+        {/* Logo */}
+        <div className="text-center mb-6">
+          <motion.h1
+            className="font-heading text-2xl text-pixel-amber inline-block"
+            style={{ textShadow: '4px 4px 0 #000', animation: 'flicker 6s ease-in-out infinite' }}
+          >
+            絕境同盟
+          </motion.h1>
+
+          <motion.div
+            animate={{ rotate: [-10, 10, -10] }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+            className="text-pixel-amber text-3xl my-2"
+          >
+            ⚔
+          </motion.div>
+
+          <p
+            className="font-heading text-[10px] text-pixel-teal tracking-widest"
+            style={{ textShadow: '2px 2px 0 #000' }}
+          >
+            DESOLATE BOND
+          </p>
+        </div>
+
+        <PixelPanel>
+          {/* Crown ornament */}
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <div className="h-px flex-1 bg-gradient-to-r from-transparent to-pixel-amber/50" />
+            <Crown className="w-4 h-4 text-pixel-amber" />
+            <div className="h-px flex-1 bg-gradient-to-l from-transparent to-pixel-amber/50" />
+          </div>
+
+          <PixelTabs
+            tabs={['LOGIN', 'REGISTER', 'GUEST']}
+            activeTab={activeTab}
+            onChange={setActiveTab}
+          />
+
+          <div className="mt-6">
+            <AnimatePresence mode="wait">
+              {activeTab === 0 && (
+                <LoginForm key="login" loading={loading}
+                  onSubmit={(u, p) => handle(() => login(u, p))} />
+              )}
+              {activeTab === 1 && (
+                <RegisterForm key="register" loading={loading}
+                  onSubmit={(u, p) => handle(() => register(u, p))} />
+              )}
+              {activeTab === 2 && (
+                <GuestForm key="guest" loading={loading}
+                  onSubmit={name => handle(() => loginAsGuest(name))} />
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="mt-4 flex items-center gap-2 font-body text-lg text-pixel-red"
+                >
+                  <span className="font-heading text-xs">!</span>
+                  {error}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </PixelPanel>
+      </motion.div>
     </div>
   );
 }
+
+// ── Sub-forms ──────────────────────────────────────────────────────────────
+
+const formAnim = {
+  initial: { opacity: 0, x: -16 },
+  animate: { opacity: 1, x: 0 },
+  exit:    { opacity: 0, x: 16 },
+  transition: { duration: 0.2 },
+};
 
 function LoginForm({ loading, onSubmit }: { loading: boolean; onSubmit: (u: string, p: string) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   return (
-    <form className="mt-4 space-y-3" onSubmit={(e) => { e.preventDefault(); onSubmit(username, password); }}>
-      <div className="space-y-1">
-        <Label htmlFor="login-username">帳號</Label>
-        <Input id="login-username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor="login-password">密碼</Label>
-        <Input id="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-      </div>
-      <Button className="w-full" type="submit" disabled={loading}>登入</Button>
-    </form>
+    <motion.form {...formAnim} className="space-y-4"
+      onSubmit={(e: React.FormEvent) => { e.preventDefault(); onSubmit(username, password); }}>
+      <PixelInput label="帳號" placeholder="輸入帳號..." value={username} onChange={e => setUsername(e.target.value)} required />
+      <PixelInput label="密碼" type="password" placeholder="輸入密碼..." value={password} onChange={e => setPassword(e.target.value)} required />
+      <PixelButton type="submit" fullWidth disabled={loading}>LOGIN</PixelButton>
+    </motion.form>
   );
 }
 
@@ -92,29 +153,26 @@ function RegisterForm({ loading, onSubmit }: { loading: boolean; onSubmit: (u: s
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   return (
-    <form className="mt-4 space-y-3" onSubmit={(e) => { e.preventDefault(); onSubmit(username, password); }}>
-      <div className="space-y-1">
-        <Label htmlFor="reg-username">帳號</Label>
-        <Input id="reg-username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+    <motion.form {...formAnim} className="space-y-4"
+      onSubmit={(e: React.FormEvent) => { e.preventDefault(); onSubmit(username, password); }}>
+      <PixelInput label="帳號" placeholder="輸入帳號..." value={username} onChange={e => setUsername(e.target.value)} required />
+      <div>
+        <PixelInput label="密碼" type="password" placeholder="輸入密碼..." value={password} onChange={e => setPassword(e.target.value)} required />
+        <p className="font-body text-sm text-pixel-muted mt-1">※ 密碼至少需要 6 個字元</p>
       </div>
-      <div className="space-y-1">
-        <Label htmlFor="reg-password">密碼（至少 6 字元）</Label>
-        <Input id="reg-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-      </div>
-      <Button className="w-full" type="submit" disabled={loading}>建立帳號</Button>
-    </form>
+      <PixelButton type="submit" fullWidth disabled={loading}>CREATE ACCOUNT</PixelButton>
+    </motion.form>
   );
 }
 
 function GuestForm({ loading, onSubmit }: { loading: boolean; onSubmit: (name: string) => void }) {
   const [displayName, setDisplayName] = useState('');
   return (
-    <form className="mt-4 space-y-3" onSubmit={(e) => { e.preventDefault(); onSubmit(displayName); }}>
-      <div className="space-y-1">
-        <Label htmlFor="guest-name">顯示名稱</Label>
-        <Input id="guest-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required placeholder="輸入名稱即可進入" />
-      </div>
-      <Button className="w-full" type="submit" disabled={loading}>以訪客身份遊玩</Button>
-    </form>
+    <motion.form {...formAnim} className="space-y-4"
+      onSubmit={(e: React.FormEvent) => { e.preventDefault(); onSubmit(displayName); }}>
+      <PixelInput label="顯示名稱" placeholder="輸入暱稱..." value={displayName} onChange={e => setDisplayName(e.target.value)} required />
+      <PixelButton type="submit" variant="secondary" fullWidth disabled={loading}>PLAY AS GUEST</PixelButton>
+      <p className="font-body text-center text-pixel-muted">無需註冊帳號</p>
+    </motion.form>
   );
 }

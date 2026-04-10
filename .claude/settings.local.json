@@ -138,7 +138,26 @@
       "Bash(powershell -Command \"Set-Location 'C:\\\\\\\\Users\\\\\\\\user\\\\\\\\Desktop\\\\\\\\gitlab\\\\\\\\desolate-bond'; npx tsc -p packages/server/tsconfig.json --noEmit 2>&1\")",
       "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); findings=[f for f in data['findings'] if f['severity'] in ['Critical','Warning']]; print\\(f'Total findings: {len\\(findings\\)}'\\); [print\\(f\\\\\"  {f['id']} [{f['severity']}]: {f['summary']}\\\\\"\\) for f in findings]\")",
       "Read(//c/Users/user/Downloads/**)",
-      "Bash(unzip -o b_2MKXcOYLnwy.zip -d v0_mainmenu)"
+      "Bash(unzip -o b_2MKXcOYLnwy.zip -d v0_mainmenu)",
+      "Bash(unzip -l b_btMmXlnf1AL.zip)",
+      "Bash(unzip -p b_btMmXlnf1AL.zip components/pages/help-page.tsx)",
+      "Bash(unzip -p b_btMmXlnf1AL.zip components/pages/auth-page.tsx)",
+      "Bash(unzip -p b_btMmXlnf1AL.zip components/pages/main-menu-page.tsx)",
+      "Bash(unzip -p b_btMmXlnf1AL.zip components/pages/lobby-page.tsx)",
+      "Bash(unzip -p b_btMmXlnf1AL.zip components/pages/leaderboard-page.tsx)",
+      "Bash(unzip -p b_btMmXlnf1AL.zip components/pages/settings-page.tsx)",
+      "Bash(unzip -p b_btMmXlnf1AL.zip components/pixel-ui.tsx)",
+      "Bash(unzip -p b_btMmXlnf1AL.zip app/globals.css)",
+      "Bash(mkdir -p \"C:/Users/user/Downloads/desolate-bond-fixed\")",
+      "Bash(unzip -o b_btMmXlnf1AL.zip -d desolate-bond-fixed/)",
+      "Bash(grep -n \"export function LeaderboardPage\\\\|export function AuthPage\\\\|export function MainMenuPage\" \"C:/Users/user/Downloads/desolate-bond-fixed/components/pages/\"*.tsx)",
+      "Bash(timeout 15 npx vite build)",
+      "Bash(timeout 20 npx vite build)",
+      "Bash(timeout 25 npx vite build)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174)",
+      "Bash(npx spectra:*)",
+      "Bash(spectra archive:*)"
     ]
   }
 }
