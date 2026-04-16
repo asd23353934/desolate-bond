@@ -22,15 +22,20 @@ export function RewardSelectionOverlay({ options, ownedWeaponIds = [], onSelect 
 
             const isWeapon = type === 'WEAPON';
             const isDuplicate = isWeapon && ownedWeaponIds.includes(defId);
+            // 武器若重複或武器槽已滿則不可選；伺服器也會拒絕，此處僅防誤觸
+            const disabled = isWeapon && (isDuplicate || weaponSlotsFull);
 
             return (
               <button
                 key={rewardId}
-                onClick={() => onSelect(rewardId)}
+                onClick={() => { if (!disabled) onSelect(rewardId); }}
+                disabled={disabled}
                 className={`text-left border rounded-lg px-4 py-3 transition-colors ${
-                  isWeapon
-                    ? 'border-orange-500 hover:border-orange-300 bg-orange-950/40'
-                    : 'border-purple-500 hover:border-purple-300 bg-purple-950/40'
+                  disabled
+                    ? 'border-gray-600 bg-gray-900/40 opacity-50 cursor-not-allowed'
+                    : isWeapon
+                      ? 'border-orange-500 hover:border-orange-300 bg-orange-950/40'
+                      : 'border-purple-500 hover:border-purple-300 bg-purple-950/40'
                 }`}
               >
                 <div className="flex items-center gap-2 mb-0.5">

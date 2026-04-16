@@ -1,4 +1,11 @@
+import { getAuthToken } from '../application/session.js';
+
 const BASE = import.meta.env['VITE_API_URL'] ?? `http://${window.location.hostname}:2567`;
+
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
@@ -29,7 +36,7 @@ export const api = {
     post<{ token: string; guestId: string; displayName: string }>('/auth/guest', { displayName }),
 
   findRoom: async (code: string): Promise<string> => {
-    const res = await fetch(`${BASE}/rooms/find/${code}`);
+    const res = await fetch(`${BASE}/rooms/find/${code}`, { headers: authHeaders() });
     const data = await res.json() as { roomId?: string; error?: string };
     if (!res.ok) throw new Error(data.error ?? 'ROOM_NOT_FOUND');
     return data.roomId!;

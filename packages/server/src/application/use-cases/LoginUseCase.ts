@@ -26,7 +26,8 @@ export class LoginUseCase {
     const secret = process.env['JWT_SECRET'];
     if (!secret) throw new Error('JWT_SECRET not configured');
 
-    const token = sign({ sub: user.id, username: user.username }, secret, { expiresIn: '7d' });
+    // 縮短有效期以降低 token 外洩時的暴露窗口（sessionStorage 關頁即清，但 token 本身仍需 server 驗證）
+    const token = sign({ sub: user.id, username: user.username }, secret, { expiresIn: '8h' });
     return { token, id: user.id, username: user.username };
   }
 }

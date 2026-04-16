@@ -1,46 +1,8 @@
 import { useState, useCallback } from 'react';
 import { api } from '../infrastructure/api.js';
+import { loadSession, saveSession, clearSession, type AuthSession } from './session.js';
 
-export interface AuthUser {
-  id: string;
-  displayName: string;
-  isGuest: boolean;
-  token: string;
-}
-
-const SESSION_KEY = 'db_auth';
-
-function isTokenExpired(token: string): boolean {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]!));
-    return typeof payload.exp === 'number' && payload.exp * 1000 < Date.now();
-  } catch {
-    return true;
-  }
-}
-
-function loadSession(): AuthUser | null {
-  try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const user = JSON.parse(raw) as AuthUser;
-    if (isTokenExpired(user.token)) {
-      sessionStorage.removeItem(SESSION_KEY);
-      return null;
-    }
-    return user;
-  } catch {
-    return null;
-  }
-}
-
-function saveSession(user: AuthUser): void {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
-}
-
-function clearSession(): void {
-  sessionStorage.removeItem(SESSION_KEY);
-}
+export type AuthUser = AuthSession;
 
 export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(loadSession);

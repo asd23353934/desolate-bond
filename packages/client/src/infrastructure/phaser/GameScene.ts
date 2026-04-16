@@ -53,7 +53,6 @@ export class GameScene extends Phaser.Scene {
   private room!: Room;
   private localSessionId!: string;
   private keyBindings!: KeyBindings;
-  private graphicsQuality!: GraphicsQuality;
   private showDamageNumbers!: boolean;
   private volume!: number;
 
@@ -139,7 +138,6 @@ export class GameScene extends Phaser.Scene {
     this.$ = getStateCallbacks(data.room) as (instance: any) => any;
     this.localSessionId = data.localSessionId;
     this.keyBindings = data.keyBindings;
-    this.graphicsQuality  = data.graphicsQuality  ?? 'high';
     this.showDamageNumbers = data.showDamageNumbers ?? true;
     this.volume = data.volume ?? 0.7;
   }

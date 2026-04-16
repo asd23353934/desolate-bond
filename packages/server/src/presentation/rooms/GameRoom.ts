@@ -36,6 +36,7 @@ export class GameRoom extends Room<LobbyState> {
   private bossPatternCooldowns = new Map<string, number>();   // patternType → ms remaining
   private preBossSelections = new Map<string, boolean>();     // sessionId → hasSelected
   private postBossSelections = new Map<string, boolean>();    // sessionId → hasSelected
+  private postBossOptions = new Map<string, string[]>();      // sessionId → 被 offer 的 3 個 rewardId（白名單）
   private botControllers = new Map<string, BotController>(); // botId → controller
   // 12.3: rescue progress per rescuer; reset if rescuer takes damage
   private rescueProgress = new Map<string, { targetId: string; ms: number }>();
@@ -140,14 +141,17 @@ export class GameRoom extends Room<LobbyState> {
       this.dequeueNextLevelUp(client.sessionId);
     });
 
-    this.onMessage('PLAYER_INPUT', (client, message: PlayerInput) => {
+    this.onMessage('PLAYER_INPUT', (client, message: unknown) => {
       if (this.state.gameState !== 'SURVIVAL_PHASE' && this.state.gameState !== 'BOSS_BATTLE') return;
       const player = this.state.players.get(client.sessionId);
       if (!player || player.isBot || player.isDown) return;
+      if (!message || typeof message !== 'object') return;
+      const { dx, dy, rescue } = message as { dx?: unknown; dy?: unknown; rescue?: unknown };
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
       this.inputBuffer.set(client.sessionId, {
-        dx: Math.sign(message.dx),
-        dy: Math.sign(message.dy),
-        rescue: !!message.rescue,
+        dx: Math.sign(dx as number),
+        dy: Math.sign(dy as number),
+        rescue: rescue === true,
       });
     });
 
@@ -168,14 +172,27 @@ export class GameRoom extends Room<LobbyState> {
     });
 
     // 10.4: Player confirms reward selection during POST_BOSS_SELECTION
-    this.onMessage('SELECT_REWARD', (client, message: { rewardId: string }) => {
+    this.onMessage('SELECT_REWARD', (client, message: unknown) => {
       if (this.state.gameState !== 'POST_BOSS_SELECTION') return;
       const player = this.state.players.get(client.sessionId);
       if (!player || player.isBot) return;
       if (!this.postBossSelections.has(client.sessionId)) return;
+      if (this.postBossSelections.get(client.sessionId) === true) return;  // 已選過
 
-      this.applyReward(client.sessionId, message.rewardId);
+      const rewardId = typeof message === 'object' && message !== null
+        ? (message as { rewardId?: unknown }).rewardId
+        : undefined;
+      if (typeof rewardId !== 'string') return;
+
+      // 白名單：rewardId 必須是本回合實際 offer 給此玩家的選項之一
+      const offered = this.postBossOptions.get(client.sessionId);
+      if (!offered || !offered.includes(rewardId)) return;
+
+      // applyReward 會驗證武器/被動重複與槽位；失敗不標記 selected，玩家可再嘗試或超時自動
+      if (!this.applyReward(client.sessionId, rewardId)) return;
+
       this.postBossSelections.set(client.sessionId, true);
+      this.postBossOptions.delete(client.sessionId);
       this.checkPostBossAllSelected();
     });
 
@@ -731,34 +748,39 @@ export class GameRoom extends Room<LobbyState> {
     this.state.boss.id = '';  // clear boss
     this.state.gameState = 'POST_BOSS_SELECTION';
     this.postBossSelections.clear();
-
-    const rewardPool = [
-      ...WEAPON_DEF_IDS.map(id => `WEAPON:${id}`),
-      ...PASSIVE_DEF_IDS.map(id => `PASSIVE:${id}`),
-    ];
+    this.postBossOptions.clear();
 
     for (const [sessionId, player] of this.state.players) {
+      const availablePool = this.availableRewardPool(player);
+
       if (player.isBot) {
-        // 11.6: Bot auto-selects a random reward immediately
-        const botPool = [...rewardPool];
-        const reward = botPool[Math.floor(Math.random() * botPool.length)]!;
-        this.applyReward(sessionId, reward);
+        // 11.6: Bot auto-selects a random available reward immediately
+        if (availablePool.length > 0) {
+          const reward = availablePool[Math.floor(Math.random() * availablePool.length)]!;
+          this.applyReward(sessionId, reward);
+        }
         continue;
       }
-      // Pick 3 random distinct rewards
-      const shuffled = [...rewardPool].sort(() => Math.random() - 0.5);
+
+      // Pick up to 3 random distinct options from the *available* pool (排除已擁有的武器/被動)
+      const shuffled = [...availablePool].sort(() => Math.random() - 0.5);
       const options = shuffled.slice(0, 3);
       this.postBossSelections.set(sessionId, false);
+      this.postBossOptions.set(sessionId, options);
       const client = this.clients.find(c => c.sessionId === sessionId);
       if (client) this.send(client, 'POST_BOSS_REWARD_OPTIONS', { options });
     }
 
     this.clock.setTimeout(() => {
       if (this.state.gameState !== 'POST_BOSS_SELECTION') return;
-      // Auto-assign random reward for non-selecting players
+      // Auto-assign random available passive for non-selecting players
       for (const [sessionId, selected] of this.postBossSelections) {
         if (selected) continue;
-        const pool = [...PASSIVE_DEF_IDS.map(id => `PASSIVE:${id}`)];
+        const player = this.state.players.get(sessionId);
+        if (!player) continue;
+        const owned = new Set(player.passiveIds.toArray());
+        const pool = PASSIVE_DEF_IDS.filter(id => !owned.has(id)).map(id => `PASSIVE:${id}`);
+        if (pool.length === 0) continue;
         const reward = pool[Math.floor(Math.random() * pool.length)]!;
         this.applyReward(sessionId, reward);
       }
@@ -766,15 +788,40 @@ export class GameRoom extends Room<LobbyState> {
     }, SELECTION_TIMEOUT_MS);
   }
 
-  private applyReward(sessionId: string, rewardId: string): void {
+  /** 回傳該玩家此刻仍可獲取的獎勵清單（排除已擁有武器、已擁有被動、已滿槽者）。 */
+  private availableRewardPool(player: PlayerSchema): string[] {
+    const pool: string[] = [];
+    const ownedWeapons = new Set(
+      [player.weaponId, player.weapon2Id, player.weapon3Id].filter(w => w) as string[],
+    );
+    const weaponSlotsFull = !!(player.weaponId && player.weapon2Id && player.weapon3Id);
+    if (!weaponSlotsFull) {
+      for (const id of WEAPON_DEF_IDS) {
+        if (!ownedWeapons.has(id)) pool.push(`WEAPON:${id}`);
+      }
+    }
+    if (player.passiveIds.length < 4) {
+      const ownedPassives = new Set(player.passiveIds.toArray());
+      for (const id of PASSIVE_DEF_IDS) {
+        if (!ownedPassives.has(id)) pool.push(`PASSIVE:${id}`);
+      }
+    }
+    return pool;
+  }
+
+  /** 套用獎勵到玩家。成功回 true；若重複或槽位已滿回 false，呼叫端應據此決定是否標記 selected。 */
+  private applyReward(sessionId: string, rewardId: string): boolean {
     const player = this.state.players.get(sessionId);
-    if (!player) return;
+    if (!player) return false;
 
     const [type, defId] = rewardId.split(':') as [string, string];
-    if (!type || !defId) return;
+    if (!type || !defId) return false;
 
     if (type === 'WEAPON') {
-      // Fill empty slot: slot 1 → 2 → 3; no replacement when all 3 are full
+      // 拒絕重複武器（任一 slot 已持有相同 defId）
+      if (player.weaponId === defId || player.weapon2Id === defId || player.weapon3Id === defId) {
+        return false;
+      }
       if (!player.weaponId) {
         player.weaponId    = defId;
         player.weaponLevel = 0;
@@ -784,17 +831,24 @@ export class GameRoom extends Room<LobbyState> {
       } else if (!player.weapon3Id) {
         player.weapon3Id    = defId;
         player.weapon3Level = 0;
+      } else {
+        return false;  // 3 槽全滿
       }
-      // All 3 slots full — silently skip (UI should not offer this)
       player.maxHp = this.getEffectiveStats(player).maxHp;
-    } else if (type === 'PASSIVE') {
-      if (player.passiveIds.length < 4) {
-        player.passiveIds.push(defId);
-        player.passiveLevels.push(0);
-        player.maxHp = this.getEffectiveStats(player).maxHp;
-      }
-      // If full, reward is silently skipped (edge case)
+      return true;
     }
+
+    if (type === 'PASSIVE') {
+      // 拒絕重複被動
+      if (player.passiveIds.toArray().includes(defId)) return false;
+      if (player.passiveIds.length >= 4) return false;
+      player.passiveIds.push(defId);
+      player.passiveLevels.push(0);
+      player.maxHp = this.getEffectiveStats(player).maxHp;
+      return true;
+    }
+
+    return false;
   }
 
   private checkPostBossAllSelected(): void {
@@ -1880,6 +1934,8 @@ export class GameRoom extends Room<LobbyState> {
 
     this.state.gameState = 'GAME_OVER';
     this.clock.setTimeout(() => {
+      // 若延遲期間已 resetToLobby 或其他狀態切換，不覆蓋到 RESULT
+      if (this.state.gameState !== 'GAME_OVER') return;
       void this.transitionToResult(false);
     }, GAME_OVER_RESULT_DELAY_MS);
   }
@@ -2016,6 +2072,7 @@ export class GameRoom extends Room<LobbyState> {
     this.rescueProgress.clear();
     this.preBossSelections.clear();
     this.postBossSelections.clear();
+    this.postBossOptions.clear();
     this.lastDownedAt.clear();
     this.inputBuffer.clear();
 

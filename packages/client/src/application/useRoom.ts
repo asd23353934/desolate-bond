@@ -14,6 +14,7 @@ export interface RoomState {
 function roomError(msg: string): string {
   if (msg === 'ROOM_FULL') return '房間已滿（最多 4 人）';
   if (msg === 'ROOM_NOT_FOUND') return '房間碼無效或已關閉';
+  if (msg === 'RATE_LIMIT') return '查詢太頻繁，請稍後再試';
   if (msg.includes('UNAUTHORIZED') || msg.includes('jwt')) return '登入已過期，請重新登入';
   return '無法加入，請稍後再試';
 }

@@ -1,0 +1,12 @@
+# Cloudflare Pages 標頭設定。只作用於 production build（dist/），不影響 Vite dev server。
+# 已知依賴：
+#   - Google Fonts (Press Start 2P, VT323) → style-src + font-src 白名單
+#   - 後端為 Colyseus WebSocket → connect-src 允許 wss:
+#   - QR code 以 data: / blob: 產生 → img-src 允許
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()

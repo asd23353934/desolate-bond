@@ -3,7 +3,8 @@ import { motion, type HTMLMotionProps } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 // ── PixelPanel ─────────────────────────────────────────────────────────────
-interface PixelPanelProps extends HTMLMotionProps<'div'> {
+interface PixelPanelProps extends Omit<HTMLMotionProps<'div'>, 'children'> {
+  children?: React.ReactNode;
   title?: string;
   showCorners?: boolean;
 }

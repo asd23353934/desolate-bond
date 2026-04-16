@@ -17,11 +17,11 @@ export class GuestLoginUseCase {
     if (!secret) throw new Error('JWT_SECRET not configured');
 
     const guestId = `guest_${crypto.randomUUID()}`;
-    // Short-lived token (browser session only — no refresh)
+    // 訪客 token 更短（無帳號根基，一次性遊玩為主；無 refresh 機制）
     const token = sign(
       { sub: guestId, displayName: displayName.trim(), isGuest: true },
       secret,
-      { expiresIn: '12h' }
+      { expiresIn: '4h' }
     );
 
     return { token, guestId, displayName: displayName.trim() };
