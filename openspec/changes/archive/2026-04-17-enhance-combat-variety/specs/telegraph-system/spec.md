@@ -1,0 +1,52 @@
+## ADDED Requirements
+
+### Requirement: Server broadcasts attack telegraphs before damaging pattern resolves
+
+The system SHALL, before resolving any damaging attack that targets a spatial region (Boss pattern, small enemy area attack, explosion), publish a telegraph entry into shared room state containing: unique id, shape (`CIRCLE`, `SECTOR`, or `LINE`), anchor position (x, y), shape-specific geometry (radius for `CIRCLE`; radius and facing angle plus arc span for `SECTOR`; endpoint offset and width for `LINE`), `startAt` server timestamp, and `fireAt` server timestamp. The telegraph entry SHALL remain in room state until `fireAt` is reached. The minimum lead time between `startAt` and `fireAt` SHALL be at least 300 milliseconds.
+
+#### Scenario: Telegraph precedes every damaging area pattern
+
+- **WHEN** the server schedules a Boss or enemy attack that will deal damage to positions (not a direct melee contact tick)
+- **THEN** the server inserts a telegraph entry into room state with `fireAt` at least 300 ms after `startAt`, and the damage SHALL NOT apply before `fireAt`
+
+#### Scenario: Late-joining client sees in-progress telegraphs
+
+- **WHEN** a client connects or reconnects while a telegraph is active in room state
+- **THEN** the client receives the telegraph entry through Colyseus state sync and renders it immediately
+
+### Requirement: Server resolves telegraphed damage exactly at fireAt and then removes the telegraph
+
+The system SHALL, on the first server tick whose timestamp is greater than or equal to `fireAt`, compute damage for the telegraph's affected entities using the telegraph's geometry, apply that damage server-side, and remove the telegraph entry from room state within the same tick. The telegraph entry MUST NOT persist past its `fireAt` tick.
+
+#### Scenario: Telegraph resolves on the fireAt tick
+
+- **WHEN** the server tick timestamp reaches or exceeds a telegraph's `fireAt`
+- **THEN** the server applies damage to all entities inside the telegraph shape and removes the telegraph entry in the same tick
+
+#### Scenario: Entity leaves the telegraph area before fireAt
+
+- **WHEN** an entity exits the telegraph shape between `startAt` and `fireAt`
+- **THEN** the server SHALL NOT apply damage to that entity when the telegraph resolves
+
+### Requirement: Client renders telegraphs using geometry from room state
+
+The system SHALL render each telegraph entry in the Phaser scene as a red warning overlay whose shape, position, and size match the telegraph geometry. The overlay SHALL animate (e.g., fill intensity increasing) between `startAt` and `fireAt` and SHALL disappear when the telegraph entry is removed from room state. Client rendering MUST NOT perform damage calculation or apply damage locally.
+
+#### Scenario: Telegraph overlay matches server geometry
+
+- **WHEN** a telegraph entry appears in room state with shape `CIRCLE`, radius 120, at position (500, 300)
+- **THEN** the client draws a red circular warning at (500, 300) with visual radius 120
+
+#### Scenario: Telegraph overlay disappears when server removes it
+
+- **WHEN** the server removes a telegraph entry from room state
+- **THEN** the client stops rendering that overlay within one frame of receiving the state change
+
+### Requirement: Telegraph capacity is bounded to protect state sync
+
+The system SHALL enforce an upper bound of 32 simultaneously active telegraph entries in room state. When a new telegraph would exceed the bound, the system SHALL drop the oldest active telegraph (by `startAt`) before inserting the new one.
+
+#### Scenario: Telegraph overflow drops oldest entry
+
+- **WHEN** the 33rd telegraph is scheduled while 32 are already active
+- **THEN** the server removes the telegraph with the smallest `startAt` and inserts the new telegraph, leaving 32 active

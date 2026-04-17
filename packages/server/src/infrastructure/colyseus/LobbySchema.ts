@@ -88,6 +88,28 @@ export class ProjectileSchema extends Schema {
   @type('string')  kind: string = '';  // '' | 'ORB' (WAND) | 'ARROW' (BOW) | 'CANNON' | 'SHIELD' | 'SATELLITE'
 }
 
+/**
+ * Attack warning indicator. Server publishes before any damaging area pattern;
+ * damage resolves at fireAt and entry is removed the same tick. Clients render only.
+ * Shape geometry:
+ *  - CIRCLE: uses (x, y, radius)
+ *  - SECTOR: uses (x, y, radius, angle=facing radians, arcSpan=radians)
+ *  - LINE:   uses (x, y) as origin, (length, angle=direction radians, width)
+ */
+export class TelegraphSchema extends Schema {
+  @type('string')  id: string = '';
+  @type('string')  shape: string = 'CIRCLE';  // 'CIRCLE' | 'SECTOR' | 'LINE'
+  @type('float32') x: number = 0;
+  @type('float32') y: number = 0;
+  @type('float32') radius: number = 0;   // CIRCLE, SECTOR
+  @type('float32') angle: number = 0;    // SECTOR facing / LINE direction (radians)
+  @type('float32') arcSpan: number = 0;  // SECTOR arc span (radians)
+  @type('float32') length: number = 0;   // LINE length (px)
+  @type('float32') width: number = 0;    // LINE width (px)
+  @type('number')  startAt: number = 0;  // server ms timestamp
+  @type('number')  fireAt: number = 0;   // server ms timestamp
+}
+
 export class LobbyState extends Schema {
   @type('string') roomCode: string = '';
   @type('string') gameState: string = 'LOBBY';
@@ -98,4 +120,5 @@ export class LobbyState extends Schema {
   @type({ map: EnemySchema })      enemies     = new MapSchema<EnemySchema>();
   @type({ map: ItemSchema })       items       = new MapSchema<ItemSchema>();
   @type({ map: ProjectileSchema }) projectiles = new MapSchema<ProjectileSchema>();
+  @type({ map: TelegraphSchema })  telegraphs  = new MapSchema<TelegraphSchema>();
 }

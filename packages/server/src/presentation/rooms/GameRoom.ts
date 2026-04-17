@@ -1,5 +1,5 @@
 import { Room, Client, matchMaker } from '@colyseus/core';
-import { LobbyState, PlayerSchema, EnemySchema, ItemSchema, ProjectileSchema } from '../../infrastructure/colyseus/LobbySchema.js';
+import { LobbyState, PlayerSchema, EnemySchema, ItemSchema, ProjectileSchema, TelegraphSchema } from '../../infrastructure/colyseus/LobbySchema.js';
 import { generateUniqueCode } from '../../domain/entities/RoomCode.js';
 import { verifyToken } from '../../infrastructure/auth/jwtRoom.js';
 import { GameSessionRepository } from '../../infrastructure/repositories/GameSessionRepository.js';
@@ -14,6 +14,10 @@ import {
   EQUIPMENT_DEFS, WEAPON_DEF_IDS, PASSIVE_DEF_IDS, scaleModifiers, canClassEquip,
 } from '../../domain/entities/EquipmentDefs.js';
 import { BOSS_DEFS, BOSS_BY_ROUND } from '../../domain/entities/BossDefs.js';
+import { BOSS_PATTERN_REGISTRY } from '../../domain/boss/patterns/registry.js';
+import type { BossPatternContext } from '../../domain/boss/patterns/types.js';
+import { getEnemyBehavior } from '../../domain/enemy/registry.js';
+import type { EnemyBehaviorContext, EnemyTargetInfo } from '../../domain/enemy/types.js';
 import { BotController } from '../../domain/entities/BotController.js';
 
 const BOT_NAMES = ['勇者Bot', '鐵壁Bot', '治癒Bot', '疾風Bot'];
@@ -54,6 +58,59 @@ export class GameRoom extends Room<LobbyState> {
   private enemySlowUntil = new Map<string, number>();      // enemyId → Date.now() timestamp (STAFF slow)
   private shieldProjectiles = new Map<string, { phase: 'out' | 'back'; startX: number; startY: number; maxRange: number; hitEnemies: Set<string> }>();
   private orbitalProjectiles = new Map<string, { ownerId: string; angleOffset: number; spawnMs: number; ttlMs: number; radius: number; spinRate: number; hitHistory: Map<string, number> }>();
+  private enemyLocalState = new Map<string, unknown>();     // enemyId → per-behavior local bag
+  private telegraphSeq = 0;
+  private scheduledHits: Array<{ telegraphId: string; fireAt: number; resolve: () => void }> = [];
+  private static readonly TELEGRAPH_MIN_LEAD_MS = 300;
+  private static readonly TELEGRAPH_MAX_ACTIVE = 32;
+
+  /**
+   * Telegraph geometry. Unused fields for the shape default to 0.
+   *  - CIRCLE: { x, y, radius }
+   *  - SECTOR: { x, y, radius, angle (facing, rad), arcSpan (rad) }
+   *  - LINE:   { x, y (origin), length, angle (direction, rad), width }
+   */
+  protected scheduleTelegraph(
+    shape: 'CIRCLE' | 'SECTOR' | 'LINE',
+    geom: { x: number; y: number; radius?: number; angle?: number; arcSpan?: number; length?: number; width?: number },
+    leadMs: number,
+    resolve: () => void,
+  ): string {
+    const now = Date.now();
+    const effectiveLead = Math.max(leadMs, GameRoom.TELEGRAPH_MIN_LEAD_MS);
+    // Capacity bound: drop the oldest visual telegraph when full, but KEEP its
+    // scheduledHit so the resolve still fires — otherwise enemy state machines
+    // (winding/telegraphing/primed) never clear and boss damage can be silently
+    // cancelled by flooding telegraphs.
+    while (this.state.telegraphs.size >= GameRoom.TELEGRAPH_MAX_ACTIVE) {
+      let oldestId = '';
+      let oldestStart = Number.POSITIVE_INFINITY;
+      this.state.telegraphs.forEach((entry, key) => {
+        if (entry.startAt < oldestStart) {
+          oldestStart = entry.startAt;
+          oldestId = key;
+        }
+      });
+      if (!oldestId) break;
+      this.state.telegraphs.delete(oldestId);
+    }
+    const id = `tg_${++this.telegraphSeq}`;
+    const tg = new TelegraphSchema();
+    tg.id = id;
+    tg.shape = shape;
+    tg.x = geom.x;
+    tg.y = geom.y;
+    tg.radius = geom.radius ?? 0;
+    tg.angle = geom.angle ?? 0;
+    tg.arcSpan = geom.arcSpan ?? 0;
+    tg.length = geom.length ?? 0;
+    tg.width = geom.width ?? 0;
+    tg.startAt = now;
+    tg.fireAt = now + effectiveLead;
+    this.state.telegraphs.set(id, tg);
+    this.scheduledHits.push({ telegraphId: id, fireAt: tg.fireAt, resolve });
+    return id;
+  }
 
   async onCreate(_options: unknown) {
     this.setState(new LobbyState());
@@ -355,6 +412,7 @@ export class GameRoom extends Room<LobbyState> {
     this.shieldProjectiles.clear();
     this.orbitalProjectiles.clear();
     this.enemySlowUntil.clear();
+    this.enemyLocalState.clear();
 
     for (const [sessionId, player] of this.state.players) {
       if (player.isBot) {
@@ -663,7 +721,34 @@ export class GameRoom extends Room<LobbyState> {
       boss.y += Math.sin(angle) * moveSpeed * this.DT;
     }
 
-    // Execute attack patterns
+    // Execute attack patterns via registry
+    const ctx: BossPatternContext = {
+      boss,
+      players: this.state.players,
+      damageScale: this.currentBossStats?.damage ?? 1,
+      nearestPlayer: nearestDist === Infinity ? null : { x: nearestX, y: nearestY, dist: nearestDist },
+      damagePlayer: (sid, amt) => this.damagePlayer(sid, amt),
+      scheduleTelegraph: (shape, geom, leadMs, resolve) => this.scheduleTelegraph(shape, geom, leadMs, resolve),
+      broadcast: (type, payload) => this.broadcast(type, payload),
+      addProjectile: (proj, ttlMs, onExpire) => {
+        this.state.projectiles.set(proj.id, proj);
+        this.clock.setTimeout(() => {
+          this.state.projectiles.delete(proj.id);
+          onExpire();
+        }, ttlMs);
+      },
+      spawnMinion: (type, x, y) => {
+        const e = new EnemySchema();
+        e.id = crypto.randomUUID();
+        e.type = type;
+        e.x = x;
+        e.y = y;
+        e.maxHp = getEnemyBehavior(type).baseHp(this.state.currentRound);
+        e.hp = e.maxHp;
+        this.state.enemies.set(e.id, e);
+      },
+    };
+
     for (const pattern of patterns) {
       const key = pattern.type;
       const cd = this.bossPatternCooldowns.get(key) ?? 0;
@@ -671,64 +756,14 @@ export class GameRoom extends Room<LobbyState> {
         this.bossPatternCooldowns.set(key, cd - 60);
         continue;
       }
-
-      const scaledDamage = Math.round(
-        pattern.damage * (this.currentBossStats?.damage ?? 1),
-      );
-
-      if (pattern.type === 'MELEE') {
-        for (const [sessionId, player] of this.state.players) {
-          if (player.isDown || player.isDisconnected) continue;
-          const dx = player.x - boss.x;
-          const dy = player.y - boss.y;
-          if (dx * dx + dy * dy <= pattern.range * pattern.range) {
-            this.damagePlayer(sessionId, scaledDamage);
-          }
-        }
+      const impl = BOSS_PATTERN_REGISTRY[key];
+      if (!impl) {
+        console.warn(`[boss-pattern] unknown id "${key}"; backing off`);
         this.bossPatternCooldowns.set(key, pattern.cooldownMs);
-
-      } else if (pattern.type === 'AREA') {
-        for (const [sessionId, player] of this.state.players) {
-          if (player.isDown || player.isDisconnected) continue;
-          const dx = player.x - boss.x;
-          const dy = player.y - boss.y;
-          if (dx * dx + dy * dy <= (pattern.radius ?? pattern.range) ** 2) {
-            this.damagePlayer(sessionId, scaledDamage);
-          }
-        }
-        this.broadcast('BOSS_AREA_ATTACK', { x: boss.x, y: boss.y, radius: pattern.radius ?? pattern.range });
-        this.bossPatternCooldowns.set(key, pattern.cooldownMs);
-
-      } else if (pattern.type === 'PROJECTILE' || pattern.type === 'CHARGE') {
-        // Aim at nearest player; projectile hits handled client-side visually,
-        // server applies damage when player is within range at fire time (simplified)
-        if (nearestDist <= pattern.range) {
-          const angle = Math.atan2(nearestY - boss.y, nearestX - boss.x);
-          const proj = new ProjectileSchema();
-          proj.id    = crypto.randomUUID();
-          proj.x     = boss.x;
-          proj.y     = boss.y;
-          proj.angle = angle;
-          this.state.projectiles.set(proj.id, proj);
-          // Remove projectile after travel time; deal damage if player still in path
-          const travelMs = Math.ceil((pattern.range / (pattern.speed ?? 200)) * 1000);
-          this.clock.setTimeout(() => {
-            this.state.projectiles.delete(proj.id);
-            // Damage players near the endpoint
-            const endX = boss.x + Math.cos(angle) * pattern.range;
-            const endY = boss.y + Math.sin(angle) * pattern.range;
-            for (const [sessionId, player] of this.state.players) {
-              if (player.isDown || player.isDisconnected) continue;
-              const dx = player.x - endX;
-              const dy = player.y - endY;
-              if (dx * dx + dy * dy <= 30 * 30) {
-                this.damagePlayer(sessionId, scaledDamage);
-              }
-            }
-          }, travelMs);
-        }
-        this.bossPatternCooldowns.set(key, pattern.cooldownMs);
+        continue;
       }
+      impl.execute(ctx, pattern);
+      this.bossPatternCooldowns.set(key, pattern.cooldownMs);
     }
   }
 
@@ -908,7 +943,31 @@ export class GameRoom extends Room<LobbyState> {
     this.processCoopSkills();
     if (this.state.gameState === 'SURVIVAL_PHASE') this.tickSurvivalTimer();
     if (this.state.gameState === 'BOSS_BATTLE') this.processBoss();
+    this.resolveTelegraphs();  // apply delayed damage and remove expired telegraphs
     this.inputBuffer.clear();
+  }
+
+  /**
+   * Scan scheduledHits; for each entry whose fireAt has passed, run its resolve
+   * callback and remove the paired telegraph from state within this same tick.
+   */
+  private resolveTelegraphs(): void {
+    if (this.scheduledHits.length === 0) return;
+    const now = Date.now();
+    const remaining: typeof this.scheduledHits = [];
+    for (const hit of this.scheduledHits) {
+      if (hit.fireAt <= now) {
+        try {
+          hit.resolve();
+        } catch (err) {
+          console.error('[telegraph] resolve callback failed', err);
+        }
+        this.state.telegraphs.delete(hit.telegraphId);
+      } else {
+        remaining.push(hit);
+      }
+    }
+    this.scheduledHits = remaining;
   }
 
   private tickSurvivalTimer(): void {
@@ -1205,7 +1264,7 @@ export class GameRoom extends Room<LobbyState> {
     elite.type  = 'elite';
     elite.x     = pos.x;
     elite.y     = pos.y;
-    const eliteHp = 400 + (this.state.currentRound - 1) * 120;  // R1:400, R2:520, R3:640…
+    const eliteHp = getEnemyBehavior('elite').baseHp(this.state.currentRound);
     elite.maxHp = eliteHp;
     elite.hp    = eliteHp;
     this.state.enemies.set(elite.id, elite);
@@ -1369,20 +1428,62 @@ export class GameRoom extends Room<LobbyState> {
     }
   }
 
+  private buildEnemyContext(
+    enemy: EnemySchema,
+    nearest: EnemyTargetInfo | null,
+    round: number,
+    slowMult: number,
+    wall: number,
+  ): EnemyBehaviorContext {
+    const enemyId = enemy.id;
+    return {
+      enemy,
+      nearestTarget: nearest,
+      dt: this.DT,
+      slowMult,
+      round,
+      worldMinX: wall,
+      worldMaxX: 1600 - wall,
+      worldMinY: wall,
+      worldMaxY: 1200 - wall,
+      damagePlayer: (sid, amt) => this.damagePlayer(sid, amt),
+      damagePlayersInRadius: (cx, cy, radius, amt) => {
+        const r2 = radius * radius;
+        for (const [sid, p] of this.state.players) {
+          if (p.isDown || p.isDisconnected) continue;
+          const dx = p.x - cx, dy = p.y - cy;
+          if (dx * dx + dy * dy <= r2) this.damagePlayer(sid, amt);
+        }
+      },
+      scheduleTelegraph: (shape, geom, leadMs, resolve) => this.scheduleTelegraph(shape, geom, leadMs, resolve),
+      spawnEnemyProjectile: (x, y, angle, speed, damage) => {
+        const proj = new ProjectileSchema();
+        proj.id     = crypto.randomUUID();
+        proj.x      = x;
+        proj.y      = y;
+        proj.angle  = angle;
+        proj.vx     = Math.cos(angle) * speed;
+        proj.vy     = Math.sin(angle) * speed;
+        proj.damage = damage;
+        this.state.projectiles.set(proj.id, proj);
+      },
+      getPlayerPosition: (sid) => {
+        const p = this.state.players.get(sid);
+        if (!p || p.isDown || p.isDisconnected) return null;
+        return { x: p.x, y: p.y };
+      },
+      getCooldown: (key) => this.attackCooldowns.get(key) ?? 0,
+      setCooldown: (key, ms) => { this.attackCooldowns.set(key, ms); },
+      getLocal: <T = unknown>() => this.enemyLocalState.get(enemyId) as T | undefined,
+      setLocal: <T = unknown>(value: T) => { this.enemyLocalState.set(enemyId, value); },
+    };
+  }
+
   /** Chase/shoot the nearest active player, apply contact damage, push-apart collision. */
   private processEnemyAI(): void {
     const round = this.state.currentRound;
-    const BASIC_SPEED   = 65 + (round - 1) * 5;  // px/s; R1:65, R2:70, R3:75…
-    const ELITE_SPEED   = 95 + (round - 1) * 5;
-    const RANGED_SPEED  = 45 + (round - 1) * 3;
-    const WALL = 32 + 10;       // world border + half-sprite
-    const CONTACT_RANGE     = 20;    // px — melee contact distance
-    const RANGED_ATTACK_DIST = 200;  // px — ranged enemy preferred attack distance
-    const MELEE_DAMAGE       = 6;    // per 60ms tick contact (~100 DPS)
-    const ELITE_DAMAGE       = 10;   // (~167 DPS)
-    const RANGED_DAMAGE      = 6;
-    const RANGED_PROJ_SPEED  = 300;  // px/s — enemy projectile travel speed
-    const PUSH_APART_RADIUS  = 22;   // px — enemy-enemy separation
+    const WALL = 32 + 10;              // world border + half-sprite
+    const PUSH_APART_RADIUS  = 22;     // px — enemy-enemy separation
 
     // Collect active player positions and IDs
     const targets: { x: number; y: number; id: string }[] = [];
@@ -1392,77 +1493,26 @@ export class GameRoom extends Room<LobbyState> {
 
     const enemyArr = [...this.state.enemies.values()];
     const nowMs = Date.now();
-    const slowMult = (eid: string): number => (this.enemySlowUntil.get(eid) ?? 0) > nowMs ? 0.6 : 1;
+    const slowMultFor = (eid: string): number => (this.enemySlowUntil.get(eid) ?? 0) > nowMs ? 0.6 : 1;
 
     for (const enemy of enemyArr) {
-      const slow = slowMult(enemy.id);
       // Find nearest player
       let nearestDist = Infinity;
-      let nearestTarget: { x: number; y: number; id: string } | null = null;
+      let nearestId = '';
+      let nearestX = 0;
+      let nearestY = 0;
       for (const t of targets) {
         const d = Math.sqrt((t.x - enemy.x) ** 2 + (t.y - enemy.y) ** 2);
-        if (d < nearestDist) { nearestDist = d; nearestTarget = t; }
+        if (d < nearestDist) { nearestDist = d; nearestId = t.id; nearestX = t.x; nearestY = t.y; }
       }
-      if (!nearestTarget) continue;
+      const nearest: EnemyTargetInfo | null = nearestId
+        ? { id: nearestId, x: nearestX, y: nearestY, dist: nearestDist, dx: nearestX - enemy.x, dy: nearestY - enemy.y }
+        : null;
+      if (!nearest) continue;
 
-      const dx = nearestTarget.x - enemy.x;
-      const dy = nearestTarget.y - enemy.y;
-
-      // Ranged enemies: keep distance and fire projectile damage when in range
-      if (enemy.type === 'ranged') {
-        if (nearestDist > RANGED_ATTACK_DIST + 20) {
-          // Close the gap
-          const inv = 1 / nearestDist;
-          enemy.x = Math.max(WALL, Math.min(1600 - WALL, enemy.x + dx * inv * RANGED_SPEED * slow * this.DT));
-          enemy.y = Math.max(WALL, Math.min(1200 - WALL, enemy.y + dy * inv * RANGED_SPEED * slow * this.DT));
-        } else if (nearestDist < RANGED_ATTACK_DIST - 20) {
-          // Back away
-          const inv = 1 / nearestDist;
-          enemy.x = Math.max(WALL, Math.min(1600 - WALL, enemy.x - dx * inv * RANGED_SPEED * slow * this.DT));
-          enemy.y = Math.max(WALL, Math.min(1200 - WALL, enemy.y - dy * inv * RANGED_SPEED * slow * this.DT));
-        }
-        // Fire every ~1.5 seconds via attackCooldowns (re-use same map)
-        const rCooldown = this.attackCooldowns.get(`enemy:${enemy.id}`) ?? 0;
-        if (rCooldown <= 0 && nearestDist <= RANGED_ATTACK_DIST + 40) {
-          this.attackCooldowns.set(`enemy:${enemy.id}`, 1500);
-          // Spawn a real projectile — damage applied on collision, not instantly
-          const angle = Math.atan2(dy, dx);
-          const proj = new ProjectileSchema();
-          proj.id     = crypto.randomUUID();
-          proj.x      = enemy.x;
-          proj.y      = enemy.y;
-          proj.angle  = angle;
-          proj.vx     = Math.cos(angle) * RANGED_PROJ_SPEED;
-          proj.vy     = Math.sin(angle) * RANGED_PROJ_SPEED;
-          proj.damage = RANGED_DAMAGE;
-          this.state.projectiles.set(proj.id, proj);
-        } else {
-          this.attackCooldowns.set(`enemy:${enemy.id}`, Math.max(0, rCooldown - 60));
-        }
-      } else {
-        // Melee movement: chase player
-        if (nearestDist >= 12) {
-          const inv = 1 / nearestDist;
-          const speed = enemy.type === 'elite' ? ELITE_SPEED : BASIC_SPEED;
-          enemy.x = Math.max(WALL, Math.min(1600 - WALL, enemy.x + dx * inv * speed * slow * this.DT));
-          enemy.y = Math.max(WALL, Math.min(1200 - WALL, enemy.y + dy * inv * speed * slow * this.DT));
-        }
-        // Contact damage
-        if (nearestDist <= CONTACT_RANGE) {
-          const dmg = enemy.type === 'elite' ? ELITE_DAMAGE : MELEE_DAMAGE;
-          // Throttle: use attackCooldowns keyed by enemy id
-          const eCooldown = this.attackCooldowns.get(`enemy:${enemy.id}`) ?? 0;
-          if (eCooldown <= 0) {
-            this.attackCooldowns.set(`enemy:${enemy.id}`, 1200);
-            this.damagePlayer(nearestTarget.id, dmg);
-          } else {
-            this.attackCooldowns.set(`enemy:${enemy.id}`, Math.max(0, eCooldown - 60));
-          }
-        } else {
-          const eCooldown = this.attackCooldowns.get(`enemy:${enemy.id}`) ?? 0;
-          if (eCooldown > 0) this.attackCooldowns.set(`enemy:${enemy.id}`, Math.max(0, eCooldown - 60));
-        }
-      }
+      const behavior = getEnemyBehavior(enemy.type);
+      const ctx = this.buildEnemyContext(enemy, nearest, round, slowMultFor(enemy.id), WALL);
+      behavior.onTick(ctx);
     }
 
     // Enemy-to-enemy push-apart collision
@@ -1667,19 +1717,17 @@ export class GameRoom extends Room<LobbyState> {
     const round = this.state.currentRound;
     // Count scales: 20 at round 1 → +5 per round (25, 30, …)
     const COUNT = 20 + (round - 1) * 5;
-    // HP scales: basic 180 at R1 → +40/round; ranged 110 → +25/round
-    // (enemies must survive long enough at 65 px/s to close a 280px weapon range)
-    const basicHp  = 180 + (round - 1) * 40;
-    const rangedHp = 110 + (round - 1) * 25;
     for (let i = 0; i < COUNT; i++) {
       const pos = GameRoom.randomEdgeSpawn();
       const enemy = new EnemySchema();
       enemy.id   = crypto.randomUUID();
-      // Every 4th enemy is a ranged type
-      enemy.type = (i % 4 === 3) ? 'ranged' : 'basic';
+      // Weighted mix over a cycle of 20: 15% exploder, 25% ranged, 60% basic.
+      // Exploder weight is capped at 15% to avoid chained detonation cascades.
+      const slot = i % 20;
+      enemy.type = slot < 3 ? 'exploder' : slot < 8 ? 'ranged' : 'basic';
       enemy.x    = pos.x;
       enemy.y    = pos.y;
-      enemy.maxHp = enemy.type === 'ranged' ? rangedHp : basicHp;
+      enemy.maxHp = getEnemyBehavior(enemy.type).baseHp(round);
       enemy.hp    = enemy.maxHp;
       this.state.enemies.set(enemy.id, enemy);
     }
@@ -2057,19 +2105,32 @@ export class GameRoom extends Room<LobbyState> {
     if (enemy.hp <= 0) {
       player.killCount += 1;
       const wasElite = enemy.type === 'elite';
+      const behavior = getEnemyBehavior(enemy.type);
+      if (behavior.onDeath) {
+        const WALL = 32 + 10;
+        const ctx = this.buildEnemyContext(enemy, null, this.state.currentRound, 1, WALL);
+        behavior.onDeath(ctx);
+      }
       this.state.enemies.delete(enemyId);
-      this.attackCooldowns.delete(enemyId);
+      // Enemy behaviors namespace cooldowns with `enemy:<id>` and optional `:suffix`;
+      // purge every entry whose key belongs to this enemy so the map can't grow unbounded.
+      const prefix = `enemy:${enemyId}`;
+      for (const key of this.attackCooldowns.keys()) {
+        if (key === prefix || key.startsWith(prefix + ':')) this.attackCooldowns.delete(key);
+      }
       this.enemySlowUntil.delete(enemyId);
+      this.enemyLocalState.delete(enemyId);
       this.shareKillXp(sessionId, wasElite ? 50 : 30);
       this.restoreHp(sessionId, wasElite ? 10 : 3);
       if (!wasElite && this.state.gameState === 'SURVIVAL_PHASE') {
-        const respawnHp = 180 + (this.state.currentRound - 1) * 40;
         this.clock.setTimeout(() => {
           if (this.state.gameState !== 'SURVIVAL_PHASE') return;
           const pos = GameRoom.randomEdgeSpawn();
           const e = new EnemySchema();
           e.id = crypto.randomUUID(); e.type = 'basic';
-          e.x = pos.x; e.y = pos.y; e.maxHp = respawnHp; e.hp = respawnHp;
+          e.x = pos.x; e.y = pos.y;
+          e.maxHp = getEnemyBehavior('basic').baseHp(this.state.currentRound);
+          e.hp = e.maxHp;
           this.state.enemies.set(e.id, e);
         }, 8_000);
       }
@@ -2528,6 +2589,7 @@ export class GameRoom extends Room<LobbyState> {
     this.shieldProjectiles.clear();
     this.orbitalProjectiles.clear();
     this.enemySlowUntil.clear();
+    this.enemyLocalState.clear();
 
     // Reset each player to lobby state
     for (const [, player] of this.state.players) {

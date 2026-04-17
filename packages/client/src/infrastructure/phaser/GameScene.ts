@@ -98,6 +98,10 @@ export class GameScene extends Phaser.Scene {
   // Schema-synced projectile sprites (ranged enemy attacks — server-authoritative travel + collision)
   private projectileSprites = new Map<string, Phaser.GameObjects.Shape>();
 
+  // Schema-synced telegraph warnings (server-authoritative damage; client renders only)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private telegraphGraphics = new Map<string, { gfx: Phaser.GameObjects.Graphics; data: any }>();
+
   // Rescue progress bars displayed above downed players' heads (targetId → bar graphics)
   private rescueBars = new Map<string, { bg: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle }>();
 
@@ -190,6 +194,7 @@ export class GameScene extends Phaser.Scene {
     this.setupItemListeners();
     this.setupBossListeners();
     this.setupProjectileListeners();
+    this.setupTelegraphListeners();
     this.setupServerMessageListeners();
     this.setupAudio();
     this.setupMinimap();
@@ -549,6 +554,82 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  // ----- Telegraph listeners (attack warning overlays) -----
+
+  private setupTelegraphListeners() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const telegraphs = (this.room.state as any).telegraphs as Map<string, any>;
+    if (!telegraphs) return;
+    const $ = this.$;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    $(telegraphs).onAdd((tg: any, id: string) => {
+      if (!this.sceneAlive) return;
+      const gfx = this.add.graphics().setDepth(1);  // below entities (depth 2+)
+      this.telegraphGraphics.set(id, { gfx, data: tg });
+      this.redrawTelegraph(gfx, tg, 0);
+    });
+
+    $(telegraphs).onRemove((_tg: unknown, id: string) => {
+      this.telegraphGraphics.get(id)?.gfx.destroy();
+      this.telegraphGraphics.delete(id);
+    });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private redrawTelegraph(gfx: Phaser.GameObjects.Graphics, tg: any, progress: number) {
+    gfx.clear();
+    // progress ∈ [0,1]: outline from start, fill intensifies approaching fireAt
+    const fillAlpha = 0.15 + 0.45 * progress;  // 0.15 → 0.6
+    const lineAlpha = 0.5 + 0.5 * progress;    // 0.5 → 1.0
+    const RED = 0xff3344;
+    gfx.fillStyle(RED, fillAlpha);
+    gfx.lineStyle(2, RED, lineAlpha);
+    if (tg.shape === 'CIRCLE') {
+      gfx.fillCircle(tg.x, tg.y, tg.radius);
+      gfx.strokeCircle(tg.x, tg.y, tg.radius);
+    } else if (tg.shape === 'SECTOR') {
+      gfx.beginPath();
+      gfx.moveTo(tg.x, tg.y);
+      const half = tg.arcSpan / 2;
+      gfx.arc(tg.x, tg.y, tg.radius, tg.angle - half, tg.angle + half, false);
+      gfx.closePath();
+      gfx.fillPath();
+      gfx.strokePath();
+    } else if (tg.shape === 'LINE') {
+      // Rotated rectangle from origin (tg.x,tg.y) along tg.angle with tg.length × tg.width
+      const cos = Math.cos(tg.angle);
+      const sin = Math.sin(tg.angle);
+      const halfW = tg.width / 2;
+      const ex = tg.x + cos * tg.length;
+      const ey = tg.y + sin * tg.length;
+      const nx = -sin * halfW;
+      const ny = cos * halfW;
+      const p1x = tg.x + nx, p1y = tg.y + ny;
+      const p2x = ex + nx,   p2y = ey + ny;
+      const p3x = ex - nx,   p3y = ey - ny;
+      const p4x = tg.x - nx, p4y = tg.y - ny;
+      gfx.beginPath();
+      gfx.moveTo(p1x, p1y);
+      gfx.lineTo(p2x, p2y);
+      gfx.lineTo(p3x, p3y);
+      gfx.lineTo(p4x, p4y);
+      gfx.closePath();
+      gfx.fillPath();
+      gfx.strokePath();
+    }
+  }
+
+  private updateTelegraphs() {
+    if (this.telegraphGraphics.size === 0) return;
+    const now = Date.now();
+    for (const { gfx, data } of this.telegraphGraphics.values()) {
+      const duration = Math.max(1, data.fireAt - data.startAt);
+      const progress = Math.min(1, Math.max(0, (now - data.startAt) / duration));
+      this.redrawTelegraph(gfx, data, progress);
+    }
+  }
+
   // ----- Boss listeners (15.1/10.2) -----
 
   private setupBossListeners() {
@@ -786,6 +867,8 @@ export class GameScene extends Phaser.Scene {
       this.playerNameLabels.get(sessionId)?.setPosition(interpolator.x, interpolator.y - 22);
       this.playerHpLabels.get(sessionId)?.setPosition(interpolator.x, interpolator.y - 10);
     }
+
+    this.updateTelegraphs();
 
     if (this.localIsDown) {
       // Poll spectatingId from state every frame so camera follows immediately after CYCLE_VIEW

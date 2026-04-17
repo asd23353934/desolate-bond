@@ -825,6 +825,33 @@ code:
   - packages/client/vite.config.ts
 -->
 
+
+<!-- @trace
+source: enhance-combat-variety
+updated: 2026-04-17
+code:
+  - packages/client/src/infrastructure/phaser/GameScene.ts
+  - packages/server/src/domain/boss/patterns/beamPattern.ts
+  - packages/server/src/domain/enemy/basicBehavior.ts
+  - packages/server/src/domain/boss/patterns/areaPattern.ts
+  - packages/server/src/domain/enemy/eliteBehavior.ts
+  - packages/server/src/domain/enemy/exploderBehavior.ts
+  - packages/server/src/domain/boss/patterns/projectilePattern.ts
+  - packages/server/src/domain/boss/patterns/registry.ts
+  - packages/server/src/domain/boss/patterns/dashLinePattern.ts
+  - packages/server/src/domain/enemy/rangedBehavior.ts
+  - packages/server/src/infrastructure/colyseus/LobbySchema.ts
+  - packages/server/src/domain/boss/patterns/meleePattern.ts
+  - packages/server/src/domain/entities/BossDefs.ts
+  - packages/server/src/presentation/rooms/GameRoom.ts
+  - packages/server/src/domain/enemy/registry.ts
+  - packages/server/src/domain/boss/patterns/types.ts
+  - CLAUDE.md
+  - packages/server/src/domain/boss/patterns/summonPattern.ts
+  - packages/server/src/domain/boss/patterns/ringBurstPattern.ts
+  - packages/server/src/domain/enemy/types.ts
+-->
+
 ### Requirement: Killing enemies restores a small amount of HP
 
 The system SHALL restore a fixed small amount of HP to the killing player each time they defeat an enemy. This amount SHALL stack with skill-based healing effects.
@@ -835,7 +862,6 @@ The system SHALL restore a fixed small amount of HP to the killing player each t
 - **THEN** the player's current HP increases by the kill-heal value, capped at max HP
 
 ## Requirements
-
 
 <!-- @trace
 source: desolate-bond-core
@@ -1019,7 +1045,7 @@ The system SHALL spawn health packs, weapons, passive items, and upgrade stones 
 ---
 ### Requirement: Elite enemies spawn on a fixed interval during survival phase
 
-The system SHALL spawn one elite enemy at a random location on the map at a fixed interval. Elite enemies SHALL have higher HP and deal more damage than normal enemies. Defeating an elite enemy SHALL drop a better reward.
+The system SHALL spawn one elite enemy at a random location on the map at a fixed interval. Elite enemies SHALL have higher HP and deal more damage than normal enemies. Elite enemies SHALL use a telegraph before any area attack they perform (using the telegraph system rules). Defeating an elite enemy SHALL drop a better reward.
 
 #### Scenario: Elite spawns at interval
 
@@ -1031,6 +1057,11 @@ The system SHALL spawn one elite enemy at a random location on the map at a fixe
 - **WHEN** a player kills an elite enemy
 - **THEN** the elite drops a higher-tier item or larger experience orb compared to normal enemies
 
+#### Scenario: Elite area attack emits a telegraph
+
+- **WHEN** an elite enemy initiates an area attack
+- **THEN** the server emits a telegraph whose shape matches the attack region and applies damage only when the telegraph resolves
+
 ---
 ### Requirement: Killing enemies restores a small amount of HP
 
@@ -1040,3 +1071,165 @@ The system SHALL restore a fixed small amount of HP to the killing player each t
 
 - **WHEN** a player kills an enemy
 - **THEN** the player's current HP increases by the kill-heal value, capped at max HP
+
+---
+### Requirement: Ranged enemies telegraph a line before each shot and reposition after firing
+
+The system SHALL, for the `ranged` enemy type, before firing each projectile, (a) hold position for a windup interval of at least 400 ms, (b) emit a `LINE` telegraph from the enemy position toward the intended target point for the duration of the windup, (c) fire the projectile when the telegraph resolves, and (d) move laterally (perpendicular to the firing line) for a reposition interval of at least 500 ms after firing before the next shot cycle begins.
+
+#### Scenario: Ranged enemy shows LINE telegraph during windup
+
+- **WHEN** a `ranged` enemy enters its firing windup
+- **THEN** the server emits a `LINE` telegraph from the enemy position to the target with `fireAt` matching the windup end, and the enemy does not move until the projectile is fired
+
+#### Scenario: Ranged enemy repositions after firing
+
+- **WHEN** a `ranged` enemy has just fired a projectile
+- **THEN** the enemy moves perpendicular to its previous firing direction for at least 500 ms before initiating another windup
+
+
+<!-- @trace
+source: enhance-combat-variety
+updated: 2026-04-17
+code:
+  - packages/client/src/infrastructure/phaser/GameScene.ts
+  - packages/server/src/domain/boss/patterns/beamPattern.ts
+  - packages/server/src/domain/enemy/basicBehavior.ts
+  - packages/server/src/domain/boss/patterns/areaPattern.ts
+  - packages/server/src/domain/enemy/eliteBehavior.ts
+  - packages/server/src/domain/enemy/exploderBehavior.ts
+  - packages/server/src/domain/boss/patterns/projectilePattern.ts
+  - packages/server/src/domain/boss/patterns/registry.ts
+  - packages/server/src/domain/boss/patterns/dashLinePattern.ts
+  - packages/server/src/domain/enemy/rangedBehavior.ts
+  - packages/server/src/infrastructure/colyseus/LobbySchema.ts
+  - packages/server/src/domain/boss/patterns/meleePattern.ts
+  - packages/server/src/domain/entities/BossDefs.ts
+  - packages/server/src/presentation/rooms/GameRoom.ts
+  - packages/server/src/domain/enemy/registry.ts
+  - packages/server/src/domain/boss/patterns/types.ts
+  - CLAUDE.md
+  - packages/server/src/domain/boss/patterns/summonPattern.ts
+  - packages/server/src/domain/boss/patterns/ringBurstPattern.ts
+  - packages/server/src/domain/enemy/types.ts
+-->
+
+---
+### Requirement: Basic enemies telegraph a line before applying contact damage
+
+The system SHALL, for the `basic` enemy type, before applying contact damage to a player, emit a `LINE` telegraph from the enemy position to the player position with a lead time of at least 400 ms. Damage SHALL resolve only when the telegraph's `fireAt` is reached and the player remains inside the telegraph shape.
+
+#### Scenario: Basic enemy damage requires completed telegraph
+
+- **WHEN** a `basic` enemy is within contact range of a player and ready to attack
+- **THEN** the server emits a `LINE` telegraph with `fireAt` at least 400 ms later, and applies contact damage only if the player is still inside the telegraph shape when it resolves
+
+#### Scenario: Player dodges out of basic enemy telegraph before fireAt
+
+- **WHEN** a player exits the `LINE` telegraph shape before `fireAt`
+- **THEN** the server applies no contact damage to that player from that telegraph
+
+
+<!-- @trace
+source: enhance-combat-variety
+updated: 2026-04-17
+code:
+  - packages/client/src/infrastructure/phaser/GameScene.ts
+  - packages/server/src/domain/boss/patterns/beamPattern.ts
+  - packages/server/src/domain/enemy/basicBehavior.ts
+  - packages/server/src/domain/boss/patterns/areaPattern.ts
+  - packages/server/src/domain/enemy/eliteBehavior.ts
+  - packages/server/src/domain/enemy/exploderBehavior.ts
+  - packages/server/src/domain/boss/patterns/projectilePattern.ts
+  - packages/server/src/domain/boss/patterns/registry.ts
+  - packages/server/src/domain/boss/patterns/dashLinePattern.ts
+  - packages/server/src/domain/enemy/rangedBehavior.ts
+  - packages/server/src/infrastructure/colyseus/LobbySchema.ts
+  - packages/server/src/domain/boss/patterns/meleePattern.ts
+  - packages/server/src/domain/entities/BossDefs.ts
+  - packages/server/src/presentation/rooms/GameRoom.ts
+  - packages/server/src/domain/enemy/registry.ts
+  - packages/server/src/domain/boss/patterns/types.ts
+  - CLAUDE.md
+  - packages/server/src/domain/boss/patterns/summonPattern.ts
+  - packages/server/src/domain/boss/patterns/ringBurstPattern.ts
+  - packages/server/src/domain/enemy/types.ts
+-->
+
+---
+### Requirement: Exploder enemies self-destruct with a circular telegraph
+
+The system SHALL support a new enemy type `exploder` with lower maximum HP and higher movement speed than the `basic` type. When an `exploder` reaches contact range of any player, or when its HP reaches zero, the system SHALL emit a `CIRCLE` telegraph centered on the exploder position with a lead time of at least 500 ms and then despawn the exploder and resolve explosion damage to all players inside the circle when `fireAt` is reached.
+
+#### Scenario: Exploder explodes on contact with a player
+
+- **WHEN** an `exploder` reaches contact range of a player
+- **THEN** the server emits a `CIRCLE` telegraph at the exploder position, marks the exploder as committed to exploding (it no longer moves), and applies explosion damage to all players inside the circle at `fireAt`
+
+#### Scenario: Exploder explodes on death
+
+- **WHEN** an `exploder` HP reaches zero
+- **THEN** the server emits a `CIRCLE` telegraph at the exploder's death position and applies explosion damage when it resolves
+
+
+<!-- @trace
+source: enhance-combat-variety
+updated: 2026-04-17
+code:
+  - packages/client/src/infrastructure/phaser/GameScene.ts
+  - packages/server/src/domain/boss/patterns/beamPattern.ts
+  - packages/server/src/domain/enemy/basicBehavior.ts
+  - packages/server/src/domain/boss/patterns/areaPattern.ts
+  - packages/server/src/domain/enemy/eliteBehavior.ts
+  - packages/server/src/domain/enemy/exploderBehavior.ts
+  - packages/server/src/domain/boss/patterns/projectilePattern.ts
+  - packages/server/src/domain/boss/patterns/registry.ts
+  - packages/server/src/domain/boss/patterns/dashLinePattern.ts
+  - packages/server/src/domain/enemy/rangedBehavior.ts
+  - packages/server/src/infrastructure/colyseus/LobbySchema.ts
+  - packages/server/src/domain/boss/patterns/meleePattern.ts
+  - packages/server/src/domain/entities/BossDefs.ts
+  - packages/server/src/presentation/rooms/GameRoom.ts
+  - packages/server/src/domain/enemy/registry.ts
+  - packages/server/src/domain/boss/patterns/types.ts
+  - CLAUDE.md
+  - packages/server/src/domain/boss/patterns/summonPattern.ts
+  - packages/server/src/domain/boss/patterns/ringBurstPattern.ts
+  - packages/server/src/domain/enemy/types.ts
+-->
+
+---
+### Requirement: Exploder spawn rate is constrained to prevent cascade explosions
+
+The system SHALL limit `exploder` spawn weight such that `exploder` represents no more than 15% of any single spawn wave's enemy count. The system SHALL cap explosion damage per telegraph at a fixed maximum regardless of the number of `exploder` entities that may trigger in proximity.
+
+#### Scenario: Exploder share in a spawn wave is bounded
+
+- **WHEN** the server generates a spawn wave
+- **THEN** at most 15% of the wave's enemy count is of type `exploder`
+
+<!-- @trace
+source: enhance-combat-variety
+updated: 2026-04-17
+code:
+  - packages/client/src/infrastructure/phaser/GameScene.ts
+  - packages/server/src/domain/boss/patterns/beamPattern.ts
+  - packages/server/src/domain/enemy/basicBehavior.ts
+  - packages/server/src/domain/boss/patterns/areaPattern.ts
+  - packages/server/src/domain/enemy/eliteBehavior.ts
+  - packages/server/src/domain/enemy/exploderBehavior.ts
+  - packages/server/src/domain/boss/patterns/projectilePattern.ts
+  - packages/server/src/domain/boss/patterns/registry.ts
+  - packages/server/src/domain/boss/patterns/dashLinePattern.ts
+  - packages/server/src/domain/enemy/rangedBehavior.ts
+  - packages/server/src/infrastructure/colyseus/LobbySchema.ts
+  - packages/server/src/domain/boss/patterns/meleePattern.ts
+  - packages/server/src/domain/entities/BossDefs.ts
+  - packages/server/src/presentation/rooms/GameRoom.ts
+  - packages/server/src/domain/enemy/registry.ts
+  - packages/server/src/domain/boss/patterns/types.ts
+  - CLAUDE.md
+  - packages/server/src/domain/boss/patterns/summonPattern.ts
+  - packages/server/src/domain/boss/patterns/ringBurstPattern.ts
+  - packages/server/src/domain/enemy/types.ts
+-->

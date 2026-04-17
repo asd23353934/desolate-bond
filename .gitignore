@@ -4,3 +4,6 @@ openspec/.vector-search.db*
 node_modules/
 packages/*/dist/
 packages/*/node_modules/
+.claude/settings.local.json
+.claude/launch.json
+.claude/scheduled_tasks.lock

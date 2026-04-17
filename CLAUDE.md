@@ -77,6 +77,8 @@ Infrastructure ← Colyseus Room / Neon DB / QRCode（實作介面）
 - **Bot AI** 與真人共用 `PlayerInput` 介面，伺服器端 `BotController` 每 tick 產生輸入
 - **遊戲狀態機**：`LOBBY → SURVIVAL_PHASE → PRE_BOSS_SELECTION → BOSS_BATTLE → POST_BOSS_SELECTION → RESULT`
 - **QR Code 進房**：客戶端生成，掃描後直接帶入房間碼
+- **Telegraph System**：所有會造成傷害的 Boss pattern 與小怪特殊攻擊，都先廣播一個 `TelegraphSchema`（CIRCLE/SECTOR/LINE，含 startAt/fireAt）後延遲結算；伺服器 tick 掃 fireAt 到期觸發 resolve callback，客戶端純渲染紅色預警。上限 32 個，強制最小 300ms 預警。相關程式在 `GameRoom.scheduleTelegraph` 與 `resolveTelegraphs`。
+- **Pattern / Behavior Registry**：Boss pattern 與小怪行為都是資料驅動 registry（`packages/server/src/domain/boss/patterns/` 與 `domain/enemy/`）。新增攻擊只要在對應目錄加一個 pattern/behavior 檔 + 註冊，不用改 GameRoom 核心 tick loop。每個 behavior 透過 `EnemyBehaviorContext` 與 GameRoom 溝通，local state 放在 `enemyLocalState` map。
 
 ## Database Schema
 
