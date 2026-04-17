@@ -16,19 +16,19 @@ const gameFlowSteps = ['LOBBY', 'SURVIVAL', 'BOSS PICK', 'BOSS BATTLE', 'REWARD'
 
 const classes = [
   {
-    name: 'TANK', icon: '🛡',
+    name: '坦克', icon: '🛡',
     stats: { hp: 200, atk: 8, spd: 140 },
     hpMax: 200, atkMax: 20, spdMax: 200,
     highlights: ['最大 HP 200，最耐打', '護盾可吸收傷害', '靜止時緩慢回復生命'],
   },
   {
-    name: 'DAMAGE', icon: '⚔',
+    name: '射手', icon: '🏹',
     stats: { hp: 80, atk: 15, spd: 160 },
     hpMax: 200, atkMax: 20, spdMax: 200,
-    highlights: ['基礎攻擊傷害最高', 'HP 越低攻擊越強', '移動速度最快'],
+    highlights: ['遠程長條穿透攻擊', 'HP 越低攻擊越強', '移動速度最快'],
   },
   {
-    name: 'SUPPORT', icon: '✚',
+    name: '補師', icon: '✚',
     stats: { hp: 120, atk: 10, spd: 150 },
     hpMax: 200, atkMax: 20, spdMax: 200,
     highlights: ['治療效果加成 ×1.3', '可為隊友持續回血', '光環提升全隊攻擊力'],

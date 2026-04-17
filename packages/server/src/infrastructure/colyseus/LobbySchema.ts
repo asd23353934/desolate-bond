@@ -32,13 +32,17 @@ export class PlayerSchema extends Schema {
   @type('int32')    killCount: number = 0;
   @type('int32')    downCount: number = 0;
   @type('int32')    rescueCount: number = 0;
-  // Equipment: up to 3 weapon slots (equal status) + up to 4 passive slots
+  // Equipment: up to 5 weapon slots (equal status) + up to 4 passive slots
   @type('string')   weaponId: string = '';    // weapon slot 1 ('' = empty)
   @type('int32')    weaponLevel: number = 0;  // weapon slot 1 upgrade level
   @type('string')   weapon2Id: string = '';   // weapon slot 2 ('' = empty)
   @type('int32')    weapon2Level: number = 0; // weapon slot 2 upgrade level
   @type('string')   weapon3Id: string = '';   // weapon slot 3 ('' = empty)
   @type('int32')    weapon3Level: number = 0; // weapon slot 3 upgrade level
+  @type('string')   weapon4Id: string = '';   // weapon slot 4 ('' = empty)
+  @type('int32')    weapon4Level: number = 0; // weapon slot 4 upgrade level
+  @type('string')   weapon5Id: string = '';   // weapon slot 5 ('' = empty)
+  @type('int32')    weapon5Level: number = 0; // weapon slot 5 upgrade level
   @type(['string']) passiveIds    = new ArraySchema<string>();  // max 4 passive def ids
   @type(['int32'])  passiveLevels = new ArraySchema<number>();  // parallel array: level per passive slot
 }
@@ -81,6 +85,7 @@ export class ProjectileSchema extends Schema {
   @type('float32') vx: number = 0;     // velocity x (px/s); 0 = boss/non-moving projectile
   @type('float32') vy: number = 0;     // velocity y (px/s)
   @type('int16')   damage: number = 0; // damage on collision
+  @type('string')  kind: string = '';  // '' | 'ORB' (WAND) | 'ARROW' (BOW) | 'CANNON' | 'SHIELD' | 'SATELLITE'
 }
 
 export class LobbyState extends Schema {

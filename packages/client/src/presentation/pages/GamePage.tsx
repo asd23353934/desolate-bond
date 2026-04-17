@@ -17,12 +17,24 @@ interface GamePageProps {
   onReturnToLobby: () => void;
 }
 
-interface LevelUpState { level: number; options: string[]; isPreBoss?: boolean; ownedLevels?: Record<string, number>; weaponId?: string; weaponLevel?: number; weapon2Id?: string; weapon2Level?: number; weapon3Id?: string; weapon3Level?: number; }
+interface LevelUpState {
+  level: number; options: string[]; isPreBoss?: boolean; ownedLevels?: Record<string, number>;
+  weaponId?: string;  weaponLevel?: number;
+  weapon2Id?: string; weapon2Level?: number;
+  weapon3Id?: string; weapon3Level?: number;
+  weapon4Id?: string; weapon4Level?: number;
+  weapon5Id?: string; weapon5Level?: number;
+}
 
 interface LocalPlayerState {
   hp: number; maxHp: number; level: number; xp: number;
   selectedClass: string; skillIds: string[]; skillLevels: number[];
-  weaponId: string; weaponLevel: number; weapon2Id: string; weapon2Level: number; weapon3Id: string; weapon3Level: number; passiveIds: string[];
+  weaponId: string;  weaponLevel: number;
+  weapon2Id: string; weapon2Level: number;
+  weapon3Id: string; weapon3Level: number;
+  weapon4Id: string; weapon4Level: number;
+  weapon5Id: string; weapon5Level: number;
+  passiveIds: string[];
   isDown: boolean;
 }
 
@@ -57,6 +69,10 @@ function useLocalPlayerState(room: Room): LocalPlayerState | null {
         weapon2Level: player.weapon2Level ?? 0,
         weapon3Id: player.weapon3Id ?? '',
         weapon3Level: player.weapon3Level ?? 0,
+        weapon4Id: player.weapon4Id ?? '',
+        weapon4Level: player.weapon4Level ?? 0,
+        weapon5Id: player.weapon5Id ?? '',
+        weapon5Level: player.weapon5Level ?? 0,
         passiveIds: player.passiveIds?.toArray?.() ?? [...(player.passiveIds ?? [])],
         isDown: player.isDown ?? false,
       });
@@ -102,7 +118,7 @@ function useTeammatesState(room: Room): TeammateState[] {
   return teammates;
 }
 
-const CLASS_LABEL: Record<string, string> = { TANK: '坦克', DAMAGE: '傷害', SUPPORT: '輔助', '': '未選' };
+const CLASS_LABEL: Record<string, string> = { TANK: '坦克', DAMAGE: '射手', SUPPORT: '補師', '': '未選' };
 
 export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -130,8 +146,22 @@ export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageP
   }, [room]);
 
   useEffect(() => {
-    const unsub = room.onMessage('PRE_BOSS_SKILL_OPTIONS', (msg: { options: string[]; ownedLevels?: Record<string, number>; weaponId?: string; weaponLevel?: number; weapon2Id?: string; weapon2Level?: number; weapon3Id?: string; weapon3Level?: number }) => {
-      setLevelUp({ level: 0, options: msg.options, isPreBoss: true, ownedLevels: msg.ownedLevels, weaponId: msg.weaponId, weaponLevel: msg.weaponLevel, weapon2Id: msg.weapon2Id, weapon2Level: msg.weapon2Level, weapon3Id: msg.weapon3Id, weapon3Level: msg.weapon3Level });
+    const unsub = room.onMessage('PRE_BOSS_SKILL_OPTIONS', (msg: {
+      options: string[]; ownedLevels?: Record<string, number>;
+      weaponId?: string;  weaponLevel?: number;
+      weapon2Id?: string; weapon2Level?: number;
+      weapon3Id?: string; weapon3Level?: number;
+      weapon4Id?: string; weapon4Level?: number;
+      weapon5Id?: string; weapon5Level?: number;
+    }) => {
+      setLevelUp({
+        level: 0, options: msg.options, isPreBoss: true, ownedLevels: msg.ownedLevels,
+        weaponId: msg.weaponId,   weaponLevel: msg.weaponLevel,
+        weapon2Id: msg.weapon2Id, weapon2Level: msg.weapon2Level,
+        weapon3Id: msg.weapon3Id, weapon3Level: msg.weapon3Level,
+        weapon4Id: msg.weapon4Id, weapon4Level: msg.weapon4Level,
+        weapon5Id: msg.weapon5Id, weapon5Level: msg.weapon5Level,
+      });
     });
     return () => { unsub(); };
   }, [room]);
@@ -241,6 +271,10 @@ export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageP
               weapon2Level={levelUp.weapon2Level}
               weapon3Id={levelUp.weapon3Id}
               weapon3Level={levelUp.weapon3Level}
+              weapon4Id={levelUp.weapon4Id}
+              weapon4Level={levelUp.weapon4Level}
+              weapon5Id={levelUp.weapon5Id}
+              weapon5Level={levelUp.weapon5Level}
             />
           )}
 
@@ -248,7 +282,7 @@ export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageP
           {postBossReward && !result && (
             <RewardSelectionOverlay
               options={postBossReward.options}
-              ownedWeaponIds={[ps?.weaponId, ps?.weapon2Id, ps?.weapon3Id].filter(Boolean) as string[]}
+              ownedWeaponIds={[ps?.weaponId, ps?.weapon2Id, ps?.weapon3Id, ps?.weapon4Id, ps?.weapon5Id].filter(Boolean) as string[]}
               onSelect={handleRewardSelect}
             />
           )}
@@ -394,6 +428,8 @@ export function GamePage({ room, settings, onLeave, onReturnToLobby }: GamePageP
                   { id: ps.weaponId,  lv: ps.weaponLevel,  label: '槽1' },
                   { id: ps.weapon2Id, lv: ps.weapon2Level ?? 0, label: '槽2' },
                   { id: ps.weapon3Id, lv: ps.weapon3Level ?? 0, label: '槽3' },
+                  { id: ps.weapon4Id, lv: ps.weapon4Level ?? 0, label: '槽4' },
+                  { id: ps.weapon5Id, lv: ps.weapon5Level ?? 0, label: '槽5' },
                 ] as { id: string; lv: number; label: string }[]).map(({ id, lv, label }) => (
                   <div key={label} className="relative group mb-1 cursor-default">
                     <div className="flex items-center gap-1">

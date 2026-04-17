@@ -20,13 +20,14 @@ type PlayerClass = typeof CLASSES[number];
 
 const CLASS_META: Record<PlayerClass, {
   icon: string;
+  label: string;
   desc: string;
   hp: number; atk: number; spd: number;
   hpMax: number; atkMax: number; spdMax: number;
 }> = {
-  TANK:    { icon: '🛡', desc: '高生命值，保護隊友', hp: 200, atk: 8,  spd: 140, hpMax: 200, atkMax: 20, spdMax: 200 },
-  DAMAGE:  { icon: '⚔', desc: '高傷害，快速移動',   hp: 80,  atk: 15, spd: 160, hpMax: 200, atkMax: 20, spdMax: 200 },
-  SUPPORT: { icon: '✚', desc: '治療隊友，增益效果', hp: 120, atk: 10, spd: 150, hpMax: 200, atkMax: 20, spdMax: 200 },
+  TANK:    { icon: '🛡', label: '坦克', desc: '高生命值，保護隊友', hp: 200, atk: 8,  spd: 140, hpMax: 200, atkMax: 20, spdMax: 200 },
+  DAMAGE:  { icon: '🏹', label: '射手', desc: '遠程射擊，長條穿透',   hp: 80,  atk: 15, spd: 160, hpMax: 200, atkMax: 20, spdMax: 200 },
+  SUPPORT: { icon: '✚', label: '補師', desc: '治療隊友，增益效果', hp: 120, atk: 10, spd: 150, hpMax: 200, atkMax: 20, spdMax: 200 },
 };
 
 function classBadgeVariant(cls: string): 'tank' | 'damage' | 'support' {
@@ -109,7 +110,7 @@ export function LobbyPage({ room, roomCode: _roomCode, user, onLeave, onGameStar
                       <div className="flex gap-2">
                         {CLASSES.map(cls => (
                           <PixelButton key={cls} variant="secondary" size="sm" onClick={() => addBot(cls)}>
-                            + {cls} BOT
+                            + {CLASS_META[cls].label} BOT
                           </PixelButton>
                         ))}
                       </div>
@@ -134,7 +135,7 @@ export function LobbyPage({ room, roomCode: _roomCode, user, onLeave, onGameStar
                   <div className="flex items-center gap-2 flex-wrap justify-end">
                     {player.selectedClass && (
                       <PixelBadge variant={classBadgeVariant(player.selectedClass)}>
-                        {player.selectedClass}
+                        {CLASS_META[player.selectedClass as PlayerClass]?.label ?? player.selectedClass}
                       </PixelBadge>
                     )}
                     {player.isHost && <PixelBadge variant="host">HOST</PixelBadge>}
@@ -169,7 +170,7 @@ export function LobbyPage({ room, roomCode: _roomCode, user, onLeave, onGameStar
                     }`}
                   >
                     <div className="text-2xl mb-1 text-center">{meta.icon}</div>
-                    <div className="font-heading text-[8px] text-pixel-text text-center mb-2">{cls}</div>
+                    <div className="font-heading text-[10px] text-pixel-text text-center mb-2">{meta.label}</div>
                     <div className="space-y-1">
                       <PixelProgressBar value={meta.hp}  max={meta.hpMax}  variant="hp"      />
                       <PixelProgressBar value={meta.atk} max={meta.atkMax} variant="default" />

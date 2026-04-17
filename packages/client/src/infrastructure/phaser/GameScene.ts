@@ -96,7 +96,7 @@ export class GameScene extends Phaser.Scene {
   private teammateArrows = new Map<string, Phaser.GameObjects.Graphics>();
 
   // Schema-synced projectile sprites (ranged enemy attacks — server-authoritative travel + collision)
-  private projectileSprites = new Map<string, Phaser.GameObjects.Arc>();
+  private projectileSprites = new Map<string, Phaser.GameObjects.Shape>();
 
   // Rescue progress bars displayed above downed players' heads (targetId → bar graphics)
   private rescueBars = new Map<string, { bg: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle }>();
@@ -515,13 +515,31 @@ export class GameScene extends Phaser.Scene {
 
     $(projectiles).onAdd((proj: any, id: string) => {
       if (!this.sceneAlive) return;
-      // Only render moving (enemy) projectiles; boss projectiles have vx==0
+      // Only render moving projectiles; boss projectiles have vx==0
       if (proj.vx === 0 && proj.vy === 0) return;
-      const ball = this.add.circle(proj.x, proj.y, 5, 0x9955ff, 1).setDepth(4);
-      this.projectileSprites.set(id, ball);
+      let sprite: Phaser.GameObjects.Shape;
+      if (proj.kind === 'ARROW') {
+        // 射手箭矢：細長矩形，朝飛行方向旋轉
+        const arrow = this.add.rectangle(proj.x, proj.y, 18, 3, 0xffe066, 1).setDepth(4);
+        arrow.setRotation(proj.angle);
+        sprite = arrow;
+      } else if (proj.kind === 'CANNON') {
+        // 加農砲彈：大紅圓
+        sprite = this.add.circle(proj.x, proj.y, 9, 0xff3322, 1).setStrokeStyle(2, 0xffaa00).setDepth(4);
+      } else if (proj.kind === 'SHIELD') {
+        // 回力盾：藍色圓盾
+        sprite = this.add.circle(proj.x, proj.y, 10, 0x44aaff, 1).setStrokeStyle(2, 0xffffff).setDepth(4);
+      } else if (proj.kind === 'SATELLITE') {
+        // 環繞聖球：金色發光球
+        sprite = this.add.circle(proj.x, proj.y, 8, 0xffdd44, 0.9).setStrokeStyle(2, 0xffffaa).setDepth(4);
+      } else {
+        // 預設：WAND 紫色光球
+        sprite = this.add.circle(proj.x, proj.y, 5, 0x9955ff, 1).setDepth(4);
+      }
+      this.projectileSprites.set(id, sprite);
       $(proj).onChange(() => {
         if (!this.sceneAlive) return;
-        ball.setPosition(proj.x, proj.y);
+        sprite.setPosition(proj.x, proj.y);
       });
     });
 
@@ -611,6 +629,47 @@ export class GameScene extends Phaser.Scene {
     this.room.onMessage('PRE_BOSS_WAITING', (msg: { timeLeft: number }) => {
       if (msg.timeLeft > 0) this.preBossExpiresAt = Date.now() + msg.timeLeft;
     });
+
+    // HAMMER shockwave — expanding ring around caster
+    this.room.onMessage('HAMMER_FX', (msg: { x: number; y: number; radius: number }) => {
+      if (!this.sceneAlive) return;
+      const ring = this.add.circle(msg.x, msg.y, 20).setStrokeStyle(4, 0xffcc00, 0.9).setDepth(3);
+      this.tweens.add({
+        targets: ring, radius: msg.radius, alpha: 0, duration: 320,
+        onUpdate: () => ring.setStrokeStyle(4, 0xffcc00, ring.alpha),
+        onComplete: () => ring.destroy(),
+      });
+    });
+
+    // DAGGER multi-strike — short flashes from caster to each target
+    this.room.onMessage('DAGGER_FX', (msg: { x: number; y: number; targets: Array<{ x: number; y: number }> }) => {
+      if (!this.sceneAlive) return;
+      for (const t of msg.targets) {
+        const line = this.add.line(0, 0, msg.x, msg.y, t.x, t.y, 0xffffff, 1).setOrigin(0, 0).setLineWidth(2).setDepth(3);
+        this.tweens.add({ targets: line, alpha: 0, duration: 180, onComplete: () => line.destroy() });
+      }
+    });
+
+    // CANNON explosion — expanding red circle
+    this.room.onMessage('EXPLOSION_FX', (msg: { x: number; y: number; radius: number }) => {
+      if (!this.sceneAlive) return;
+      const blast = this.add.circle(msg.x, msg.y, 10, 0xff5522, 0.7).setDepth(3);
+      this.tweens.add({
+        targets: blast, radius: msg.radius, alpha: 0, duration: 360,
+        onComplete: () => blast.destroy(),
+      });
+    });
+
+    // STAFF pulse — expanding green ring (healing/slow aura)
+    this.room.onMessage('STAFF_FX', (msg: { x: number; y: number; radius: number }) => {
+      if (!this.sceneAlive) return;
+      const ring = this.add.circle(msg.x, msg.y, 20, 0x44ff99, 0.25).setStrokeStyle(3, 0x88ffcc, 0.9).setDepth(3);
+      this.tweens.add({
+        targets: ring, radius: msg.radius, alpha: 0, duration: 500,
+        onComplete: () => ring.destroy(),
+      });
+    });
+
   }
 
   // ----- Minimap -----

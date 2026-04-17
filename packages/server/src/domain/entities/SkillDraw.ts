@@ -10,8 +10,8 @@ export const MAX_WEAPON_LEVEL = 5;
 /**
  * Draw up to `count` skill options for a player.
  * Includes skills not yet owned (new), skills below max level (upgrades),
- * and weapon upgrade tokens (WEAPON_LEVEL / WEAPON2_LEVEL / WEAPON3_LEVEL) when applicable.
- * All three weapon slots are equal — no primary/secondary distinction.
+ * and weapon upgrade tokens (WEAPON_LEVEL / WEAPON2..5_LEVEL) when applicable.
+ * All five weapon slots are equal — no primary/secondary distinction.
  */
 export function drawSkillOptions(
   playerClass: string,
@@ -25,6 +25,10 @@ export function drawSkillOptions(
   weapon2Level: number = 0,
   weapon3Id: string = '',
   weapon3Level: number = 0,
+  weapon4Id: string = '',
+  weapon4Level: number = 0,
+  weapon5Id: string = '',
+  weapon5Level: number = 0,
 ): string[] {
   const ownedSet   = new Set(ownedSkills);
   const classPool  = (CLASS_SKILL_POOLS[playerClass] ?? []).filter(s => !ownedSet.has(s));
@@ -34,12 +38,10 @@ export function drawSkillOptions(
   const upgradePool = ownedSkills.filter((id, i) => (skillLevels[i] ?? 1) < MAX_SKILL_LEVEL);
 
   // Already-equipped weapon ids (to avoid offering duplicates in other slots)
-  const equippedWeapons = [weaponId, weapon2Id, weapon3Id].filter(Boolean);
+  const equippedWeapons = [weaponId, weapon2Id, weapon3Id, weapon4Id, weapon5Id].filter(Boolean);
 
   // Weapons available for each empty slot (excluding already-equipped)
-  const slot1Candidates = availableWeaponIds.filter(wid => !equippedWeapons.includes(wid));
-  const slot2Candidates = availableWeaponIds.filter(wid => wid !== weapon2Id && !equippedWeapons.includes(wid));
-  const slot3Candidates = availableWeaponIds.filter(wid => wid !== weapon3Id && !equippedWeapons.includes(wid));
+  const slotCandidates = availableWeaponIds.filter(wid => !equippedWeapons.includes(wid));
 
   const weighted: string[] = [
     ...classPool.flatMap(s  => Array<string>(CLASS_WEIGHT).fill(s)),
@@ -49,12 +51,14 @@ export function drawSkillOptions(
     ...(weaponId  && weaponLevel  < MAX_WEAPON_LEVEL ? Array<string>(WEAPON_WEIGHT).fill('WEAPON_LEVEL')  : []),
     ...(weapon2Id && weapon2Level < MAX_WEAPON_LEVEL ? Array<string>(WEAPON_WEIGHT).fill('WEAPON2_LEVEL') : []),
     ...(weapon3Id && weapon3Level < MAX_WEAPON_LEVEL ? Array<string>(WEAPON_WEIGHT).fill('WEAPON3_LEVEL') : []),
-    // Weapon acquisition: slot 1 if empty
-    ...(!weaponId ? slot1Candidates.flatMap(wid => Array<string>(WEAPON_WEIGHT).fill(wid)) : []),
-    // Weapon acquisition: slot 2 if slot 1 filled but slot 2 empty
-    ...(weaponId && !weapon2Id ? slot2Candidates.flatMap(wid => Array<string>(WEAPON_WEIGHT).fill(`W2:${wid}`)) : []),
-    // Weapon acquisition: slot 3 if slots 1&2 filled but slot 3 empty
-    ...(weaponId && weapon2Id && !weapon3Id ? slot3Candidates.flatMap(wid => Array<string>(WEAPON_WEIGHT).fill(`W3:${wid}`)) : []),
+    ...(weapon4Id && weapon4Level < MAX_WEAPON_LEVEL ? Array<string>(WEAPON_WEIGHT).fill('WEAPON4_LEVEL') : []),
+    ...(weapon5Id && weapon5Level < MAX_WEAPON_LEVEL ? Array<string>(WEAPON_WEIGHT).fill('WEAPON5_LEVEL') : []),
+    // Weapon acquisition: next empty slot only
+    ...(!weaponId ? slotCandidates.flatMap(wid => Array<string>(WEAPON_WEIGHT).fill(wid)) : []),
+    ...(weaponId && !weapon2Id ? slotCandidates.flatMap(wid => Array<string>(WEAPON_WEIGHT).fill(`W2:${wid}`)) : []),
+    ...(weaponId && weapon2Id && !weapon3Id ? slotCandidates.flatMap(wid => Array<string>(WEAPON_WEIGHT).fill(`W3:${wid}`)) : []),
+    ...(weaponId && weapon2Id && weapon3Id && !weapon4Id ? slotCandidates.flatMap(wid => Array<string>(WEAPON_WEIGHT).fill(`W4:${wid}`)) : []),
+    ...(weaponId && weapon2Id && weapon3Id && weapon4Id && !weapon5Id ? slotCandidates.flatMap(wid => Array<string>(WEAPON_WEIGHT).fill(`W5:${wid}`)) : []),
   ];
 
   // Fallback: when all skills and weapons are maxed, offer repeatable stat boosts

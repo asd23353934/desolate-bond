@@ -14,9 +14,29 @@ interface SkillSelectionOverlayProps {
   weapon2Level?: number;
   weapon3Id?: string;
   weapon3Level?: number;
+  weapon4Id?: string;
+  weapon4Level?: number;
+  weapon5Id?: string;
+  weapon5Level?: number;
 }
 
-export function SkillSelectionOverlay({ level, options, onSelect, isPreBoss, preBossTimeLeft, ownedLevels = {}, weaponId = '', weaponLevel = 0, weapon2Id = '', weapon2Level = 0, weapon3Id = '', weapon3Level = 0 }: SkillSelectionOverlayProps) {
+export function SkillSelectionOverlay({
+  level, options, onSelect, isPreBoss, preBossTimeLeft, ownedLevels = {},
+  weaponId = '',  weaponLevel = 0,
+  weapon2Id = '', weapon2Level = 0,
+  weapon3Id = '', weapon3Level = 0,
+  weapon4Id = '', weapon4Level = 0,
+  weapon5Id = '', weapon5Level = 0,
+}: SkillSelectionOverlayProps) {
+  // Per-slot descriptors — used to match both upgrade (WEAPONn_LEVEL) and acquisition (Wn:ID) options
+  const slots: Array<{ slotNum: number; upgradeId: string; acquirePrefix: string; id: string; lv: number; label: string }> = [
+    { slotNum: 1, upgradeId: 'WEAPON_LEVEL',  acquirePrefix: '',    id: weaponId,  lv: weaponLevel,  label: '武器槽1' },
+    { slotNum: 2, upgradeId: 'WEAPON2_LEVEL', acquirePrefix: 'W2:', id: weapon2Id, lv: weapon2Level, label: '武器槽2' },
+    { slotNum: 3, upgradeId: 'WEAPON3_LEVEL', acquirePrefix: 'W3:', id: weapon3Id, lv: weapon3Level, label: '武器槽3' },
+    { slotNum: 4, upgradeId: 'WEAPON4_LEVEL', acquirePrefix: 'W4:', id: weapon4Id, lv: weapon4Level, label: '武器槽4' },
+    { slotNum: 5, upgradeId: 'WEAPON5_LEVEL', acquirePrefix: 'W5:', id: weapon5Id, lv: weapon5Level, label: '武器槽5' },
+  ];
+
   return (
     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
       <div className="pointer-events-auto bg-black/80 border border-yellow-500 rounded-xl p-6 w-[480px] text-white">
@@ -37,68 +57,31 @@ export function SkillSelectionOverlay({ level, options, onSelect, isPreBoss, pre
         )}
         <div className="flex flex-col gap-3">
           {options.map((id) => {
-            // Slot-1 weapon upgrade
-            if (id === 'WEAPON_LEVEL') {
-              const weaponDef = ITEM_DEFS[weaponId];
+            // Weapon upgrade option (WEAPON_LEVEL / WEAPON2..5_LEVEL)
+            const upgradeSlot = slots.find(s => s.upgradeId === id);
+            if (upgradeSlot) {
+              const weaponDef = ITEM_DEFS[upgradeSlot.id];
               if (!weaponDef) return null;
-              const nextWLv = weaponLevel + 1;
+              const nextWLv = upgradeSlot.lv + 1;
               const desc = weaponDef.levelDesc?.[nextWLv] ?? weaponDef.description;
               return (
                 <button
-                  key="WEAPON_LEVEL"
-                  onClick={() => onSelect('WEAPON_LEVEL')}
+                  key={id}
+                  onClick={() => onSelect(id)}
                   className="text-left border border-orange-500 hover:border-orange-300 bg-orange-950/40 rounded-lg px-4 py-3 transition-colors"
                 >
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="font-semibold text-orange-300">強化{weaponDef.name}</span>
-                    <span className="text-xs bg-orange-700 text-white px-1.5 py-0.5 rounded">槽1 Lv.{weaponLevel} → Lv.{nextWLv}</span>
+                    <span className="text-xs bg-orange-700 text-white px-1.5 py-0.5 rounded">槽{upgradeSlot.slotNum} Lv.{upgradeSlot.lv} → Lv.{nextWLv}</span>
                   </div>
                   <div className="text-sm text-gray-300">{desc}</div>
                 </button>
               );
             }
-            // Slot-2 weapon upgrade
-            if (id === 'WEAPON2_LEVEL') {
-              const weaponDef = ITEM_DEFS[weapon2Id];
-              if (!weaponDef) return null;
-              const nextWLv = weapon2Level + 1;
-              const desc = weaponDef.levelDesc?.[nextWLv] ?? weaponDef.description;
-              return (
-                <button
-                  key="WEAPON2_LEVEL"
-                  onClick={() => onSelect('WEAPON2_LEVEL')}
-                  className="text-left border border-orange-500 hover:border-orange-300 bg-orange-950/40 rounded-lg px-4 py-3 transition-colors"
-                >
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-semibold text-orange-300">強化{weaponDef.name}</span>
-                    <span className="text-xs bg-orange-700 text-white px-1.5 py-0.5 rounded">槽2 Lv.{weapon2Level} → Lv.{nextWLv}</span>
-                  </div>
-                  <div className="text-sm text-gray-300">{desc}</div>
-                </button>
-              );
-            }
-            // Slot-3 weapon upgrade
-            if (id === 'WEAPON3_LEVEL') {
-              const weaponDef = ITEM_DEFS[weapon3Id];
-              if (!weaponDef) return null;
-              const nextWLv = weapon3Level + 1;
-              const desc = weaponDef.levelDesc?.[nextWLv] ?? weaponDef.description;
-              return (
-                <button
-                  key="WEAPON3_LEVEL"
-                  onClick={() => onSelect('WEAPON3_LEVEL')}
-                  className="text-left border border-orange-500 hover:border-orange-300 bg-orange-950/40 rounded-lg px-4 py-3 transition-colors"
-                >
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-semibold text-orange-300">強化{weaponDef.name}</span>
-                    <span className="text-xs bg-orange-700 text-white px-1.5 py-0.5 rounded">槽3 Lv.{weapon3Level} → Lv.{nextWLv}</span>
-                  </div>
-                  <div className="text-sm text-gray-300">{desc}</div>
-                </button>
-              );
-            }
-            // Slot-2 weapon acquisition (W2:SWORD etc.)
-            if (id.startsWith('W2:')) {
+
+            // Weapon acquisition for slots 2–5 (W2:/W3:/W4:/W5: prefix)
+            const acquireSlot = slots.find(s => s.acquirePrefix && id.startsWith(s.acquirePrefix));
+            if (acquireSlot) {
               const wid = id.slice(3);
               const weaponDef = ITEM_DEFS[wid];
               if (!weaponDef) return null;
@@ -110,26 +93,7 @@ export function SkillSelectionOverlay({ level, options, onSelect, isPreBoss, pre
                 >
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="font-semibold text-orange-200">獲得{weaponDef.name}</span>
-                    <span className="text-xs bg-orange-800 text-orange-200 px-1.5 py-0.5 rounded">武器槽2</span>
-                  </div>
-                  <div className="text-sm text-gray-300">{weaponDef.levelDesc?.[0] ?? weaponDef.description}</div>
-                </button>
-              );
-            }
-            // Slot-3 weapon acquisition (W3:SWORD etc.)
-            if (id.startsWith('W3:')) {
-              const wid = id.slice(3);
-              const weaponDef = ITEM_DEFS[wid];
-              if (!weaponDef) return null;
-              return (
-                <button
-                  key={id}
-                  onClick={() => onSelect(id)}
-                  className="text-left border border-orange-400 hover:border-orange-200 bg-orange-950/30 rounded-lg px-4 py-3 transition-colors"
-                >
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-semibold text-orange-200">獲得{weaponDef.name}</span>
-                    <span className="text-xs bg-orange-800 text-orange-200 px-1.5 py-0.5 rounded">武器槽3</span>
+                    <span className="text-xs bg-orange-800 text-orange-200 px-1.5 py-0.5 rounded">{acquireSlot.label}</span>
                   </div>
                   <div className="text-sm text-gray-300">{weaponDef.levelDesc?.[0] ?? weaponDef.description}</div>
                 </button>

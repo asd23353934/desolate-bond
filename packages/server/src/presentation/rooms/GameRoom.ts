@@ -11,7 +11,7 @@ import { CLASS_STATS, DEFAULT_CLASS_STATS } from '../../domain/entities/ClassDef
 import { ALL_SKILL_IDS, COOPERATIVE_SKILLS, STAT_BOOST_IDS } from '../../domain/entities/SkillPools.js';
 import { drawSkillOptions, MAX_SKILL_LEVEL, MAX_WEAPON_LEVEL } from '../../domain/entities/SkillDraw.js';
 import {
-  EQUIPMENT_DEFS, WEAPON_DEF_IDS, PASSIVE_DEF_IDS, scaleModifiers,
+  EQUIPMENT_DEFS, WEAPON_DEF_IDS, PASSIVE_DEF_IDS, scaleModifiers, canClassEquip,
 } from '../../domain/entities/EquipmentDefs.js';
 import { BOSS_DEFS, BOSS_BY_ROUND } from '../../domain/entities/BossDefs.js';
 import { BotController } from '../../domain/entities/BotController.js';
@@ -49,8 +49,11 @@ export class GameRoom extends Room<LobbyState> {
   private pendingPreBossOfferIds = new Set<string>();   // players whose pre-boss offer waits until level-ups done
   private preBossSelectionStartedAt = 0;
   // Weapon pattern helpers
-  private playerProjectileIds = new Set<string>();         // projectiles fired by players (WAND)
+  private playerProjectileIds = new Set<string>();         // projectiles fired by players
   private prevPlayerPositions = new Map<string, { x: number; y: number }>(); // for FORTIFY
+  private enemySlowUntil = new Map<string, number>();      // enemyId → Date.now() timestamp (STAFF slow)
+  private shieldProjectiles = new Map<string, { phase: 'out' | 'back'; startX: number; startY: number; maxRange: number; hitEnemies: Set<string> }>();
+  private orbitalProjectiles = new Map<string, { ownerId: string; angleOffset: number; spawnMs: number; ttlMs: number; radius: number; spinRate: number; hitHistory: Map<string, number> }>();
 
   async onCreate(_options: unknown) {
     this.setState(new LobbyState());
@@ -271,6 +274,10 @@ export class GameRoom extends Room<LobbyState> {
       weapon2Level:  leaving.weapon2Level,
       weapon3Id:     leaving.weapon3Id,
       weapon3Level:  leaving.weapon3Level,
+      weapon4Id:     leaving.weapon4Id,
+      weapon4Level:  leaving.weapon4Level,
+      weapon5Id:     leaving.weapon5Id,
+      weapon5Level:  leaving.weapon5Level,
       passiveIds:    leaving.passiveIds.toArray(),
       passiveLevels: leaving.passiveLevels.toArray(),
     };
@@ -299,6 +306,10 @@ export class GameRoom extends Room<LobbyState> {
       bot.weapon2Level = snapshot.weapon2Level;
       bot.weapon3Id    = snapshot.weapon3Id;
       bot.weapon3Level = snapshot.weapon3Level;
+      bot.weapon4Id    = snapshot.weapon4Id;
+      bot.weapon4Level = snapshot.weapon4Level;
+      bot.weapon5Id    = snapshot.weapon5Id;
+      bot.weapon5Level = snapshot.weapon5Level;
       snapshot.passiveIds.forEach(id => bot.passiveIds.push(id));
       snapshot.passiveLevels.forEach(lvl => bot.passiveLevels.push(lvl));
       this.state.players.set(bot.id, bot);
@@ -340,6 +351,10 @@ export class GameRoom extends Room<LobbyState> {
     // Clear all enemies and projectiles before boss battle to reduce state patch size
     this.state.enemies.clear();
     this.state.projectiles.clear();
+    this.playerProjectileIds.clear();
+    this.shieldProjectiles.clear();
+    this.orbitalProjectiles.clear();
+    this.enemySlowUntil.clear();
 
     for (const [sessionId, player] of this.state.players) {
       if (player.isBot) {
@@ -382,7 +397,14 @@ export class GameRoom extends Room<LobbyState> {
     const ownedLevels = this.buildOwnedLevels(player);
     this.preBossSelections.set(sessionId, false);
     const client = this.clients.find(c => c.sessionId === sessionId);
-    if (client) this.send(client, 'PRE_BOSS_SKILL_OPTIONS', { options, ownedLevels, weaponId: player.weaponId, weaponLevel: player.weaponLevel, weapon2Id: player.weapon2Id, weapon2Level: player.weapon2Level, weapon3Id: player.weapon3Id, weapon3Level: player.weapon3Level });
+    if (client) this.send(client, 'PRE_BOSS_SKILL_OPTIONS', {
+      options, ownedLevels,
+      weaponId: player.weaponId,   weaponLevel: player.weaponLevel,
+      weapon2Id: player.weapon2Id, weapon2Level: player.weapon2Level,
+      weapon3Id: player.weapon3Id, weapon3Level: player.weapon3Level,
+      weapon4Id: player.weapon4Id, weapon4Level: player.weapon4Level,
+      weapon5Id: player.weapon5Id, weapon5Level: player.weapon5Level,
+    });
   }
 
   private autoAssignPreBossSkills(): void {
@@ -451,6 +473,10 @@ export class GameRoom extends Room<LobbyState> {
       weapon2Level: player.weapon2Level,
       weapon3Id: player.weapon3Id,
       weapon3Level: player.weapon3Level,
+      weapon4Id: player.weapon4Id,
+      weapon4Level: player.weapon4Level,
+      weapon5Id: player.weapon5Id,
+      weapon5Level: player.weapon5Level,
     });
   }
 
@@ -792,11 +818,13 @@ export class GameRoom extends Room<LobbyState> {
   private availableRewardPool(player: PlayerSchema): string[] {
     const pool: string[] = [];
     const ownedWeapons = new Set(
-      [player.weaponId, player.weapon2Id, player.weapon3Id].filter(w => w) as string[],
+      [player.weaponId, player.weapon2Id, player.weapon3Id, player.weapon4Id, player.weapon5Id].filter(w => w) as string[],
     );
-    const weaponSlotsFull = !!(player.weaponId && player.weapon2Id && player.weapon3Id);
+    const weaponSlotsFull = !!(player.weaponId && player.weapon2Id && player.weapon3Id && player.weapon4Id && player.weapon5Id);
     if (!weaponSlotsFull) {
       for (const id of WEAPON_DEF_IDS) {
+        const def = EQUIPMENT_DEFS[id];
+        if (!def || !canClassEquip(def, player.selectedClass)) continue;
         if (!ownedWeapons.has(id)) pool.push(`WEAPON:${id}`);
       }
     }
@@ -818,8 +846,14 @@ export class GameRoom extends Room<LobbyState> {
     if (!type || !defId) return false;
 
     if (type === 'WEAPON') {
+      // 拒絕非本職業武器
+      const def = EQUIPMENT_DEFS[defId];
+      if (!def || !canClassEquip(def, player.selectedClass)) return false;
       // 拒絕重複武器（任一 slot 已持有相同 defId）
-      if (player.weaponId === defId || player.weapon2Id === defId || player.weapon3Id === defId) {
+      if (
+        player.weaponId === defId || player.weapon2Id === defId || player.weapon3Id === defId ||
+        player.weapon4Id === defId || player.weapon5Id === defId
+      ) {
         return false;
       }
       if (!player.weaponId) {
@@ -831,8 +865,14 @@ export class GameRoom extends Room<LobbyState> {
       } else if (!player.weapon3Id) {
         player.weapon3Id    = defId;
         player.weapon3Level = 0;
+      } else if (!player.weapon4Id) {
+        player.weapon4Id    = defId;
+        player.weapon4Level = 0;
+      } else if (!player.weapon5Id) {
+        player.weapon5Id    = defId;
+        player.weapon5Level = 0;
       } else {
-        return false;  // 3 槽全滿
+        return false;  // 5 槽全滿
       }
       player.maxHp = this.getEffectiveStats(player).maxHp;
       return true;
@@ -907,10 +947,15 @@ export class GameRoom extends Room<LobbyState> {
 
   /** Grant a skill or upgrade it if already owned. Handles new-skill init + HEAL instant HP. */
   private applySkillSelection(player: PlayerSchema, skillId: string): void {
+    // Class-aware acquisition guard shared by all slot branches
+    const isAcquirable = (wid: string): boolean => {
+      const def = EQUIPMENT_DEFS[wid];
+      return !!def && WEAPON_DEF_IDS.includes(wid) && canClassEquip(def, player.selectedClass);
+    };
     // Slot-2 weapon acquisition: "W2:SWORD" etc.
     if (skillId.startsWith('W2:')) {
       const wid = skillId.slice(3);
-      if (WEAPON_DEF_IDS.includes(wid) && player.weaponId && !player.weapon2Id) {
+      if (isAcquirable(wid) && player.weaponId && !player.weapon2Id) {
         player.weapon2Id = wid;
         player.weapon2Level = 0;
         player.maxHp = this.getEffectiveStats(player).maxHp;
@@ -920,9 +965,29 @@ export class GameRoom extends Room<LobbyState> {
     // Slot-3 weapon acquisition: "W3:SWORD" etc.
     if (skillId.startsWith('W3:')) {
       const wid = skillId.slice(3);
-      if (WEAPON_DEF_IDS.includes(wid) && player.weaponId && player.weapon2Id && !player.weapon3Id) {
+      if (isAcquirable(wid) && player.weaponId && player.weapon2Id && !player.weapon3Id) {
         player.weapon3Id = wid;
         player.weapon3Level = 0;
+        player.maxHp = this.getEffectiveStats(player).maxHp;
+      }
+      return;
+    }
+    // Slot-4 weapon acquisition
+    if (skillId.startsWith('W4:')) {
+      const wid = skillId.slice(3);
+      if (isAcquirable(wid) && player.weaponId && player.weapon2Id && player.weapon3Id && !player.weapon4Id) {
+        player.weapon4Id = wid;
+        player.weapon4Level = 0;
+        player.maxHp = this.getEffectiveStats(player).maxHp;
+      }
+      return;
+    }
+    // Slot-5 weapon acquisition
+    if (skillId.startsWith('W5:')) {
+      const wid = skillId.slice(3);
+      if (isAcquirable(wid) && player.weaponId && player.weapon2Id && player.weapon3Id && player.weapon4Id && !player.weapon5Id) {
+        player.weapon5Id = wid;
+        player.weapon5Level = 0;
         player.maxHp = this.getEffectiveStats(player).maxHp;
       }
       return;
@@ -943,8 +1008,25 @@ export class GameRoom extends Room<LobbyState> {
       }
       return;
     }
+    // Slot-4 weapon upgrade
+    if (skillId === 'WEAPON4_LEVEL') {
+      if (player.weapon4Id && player.weapon4Level < MAX_WEAPON_LEVEL) {
+        player.weapon4Level += 1;
+        player.maxHp = this.getEffectiveStats(player).maxHp;
+      }
+      return;
+    }
+    // Slot-5 weapon upgrade
+    if (skillId === 'WEAPON5_LEVEL') {
+      if (player.weapon5Id && player.weapon5Level < MAX_WEAPON_LEVEL) {
+        player.weapon5Level += 1;
+        player.maxHp = this.getEffectiveStats(player).maxHp;
+      }
+      return;
+    }
     // Slot-1 weapon acquisition — player selects a weapon for the first time
     if (WEAPON_DEF_IDS.includes(skillId)) {
+      if (!isAcquirable(skillId)) return;
       player.weaponId = skillId;
       player.weaponLevel = 0;
       player.maxHp = this.getEffectiveStats(player).maxHp;
@@ -982,11 +1064,15 @@ export class GameRoom extends Room<LobbyState> {
     player.maxHp = this.getEffectiveStats(player).maxHp;
   }
 
-  /** Draws skill options for a player, including all three weapon slots. */
+  /** Draws skill options for a player, including all five weapon slots. */
   private drawPlayerSkillOptions(player: PlayerSchema, count = 3): string[] {
-    // Offer weapons for any empty slot (slot 1: bare IDs; slot 2: W2: prefix; slot 3: W3: prefix)
-    const hasAllSlots = player.weaponId && player.weapon2Id && player.weapon3Id;
-    const availableWeapons = hasAllSlots ? [] : WEAPON_DEF_IDS;
+    const hasAllSlots = player.weaponId && player.weapon2Id && player.weapon3Id && player.weapon4Id && player.weapon5Id;
+    const availableWeapons = hasAllSlots
+      ? []
+      : WEAPON_DEF_IDS.filter(id => {
+          const def = EQUIPMENT_DEFS[id];
+          return def && canClassEquip(def, player.selectedClass);
+        });
     return drawSkillOptions(
       player.selectedClass,
       player.skillIds.toArray(),
@@ -999,6 +1085,10 @@ export class GameRoom extends Room<LobbyState> {
       player.weapon2Level,
       player.weapon3Id,
       player.weapon3Level,
+      player.weapon4Id,
+      player.weapon4Level,
+      player.weapon5Id,
+      player.weapon5Level,
     );
   }
 
@@ -1006,9 +1096,12 @@ export class GameRoom extends Room<LobbyState> {
   private isValidSkillId(skillId: string): boolean {
     if (ALL_SKILL_IDS.has(skillId)) return true;
     if (WEAPON_DEF_IDS.includes(skillId)) return true;
-    if (skillId === 'WEAPON_LEVEL' || skillId === 'WEAPON2_LEVEL' || skillId === 'WEAPON3_LEVEL') return true;
+    if (skillId === 'WEAPON_LEVEL' || skillId === 'WEAPON2_LEVEL' || skillId === 'WEAPON3_LEVEL' ||
+        skillId === 'WEAPON4_LEVEL' || skillId === 'WEAPON5_LEVEL') return true;
     if (skillId.startsWith('W2:') && WEAPON_DEF_IDS.includes(skillId.slice(3))) return true;
     if (skillId.startsWith('W3:') && WEAPON_DEF_IDS.includes(skillId.slice(3))) return true;
+    if (skillId.startsWith('W4:') && WEAPON_DEF_IDS.includes(skillId.slice(3))) return true;
+    if (skillId.startsWith('W5:') && WEAPON_DEF_IDS.includes(skillId.slice(3))) return true;
     return false;
   }
 
@@ -1173,24 +1266,16 @@ export class GameRoom extends Room<LobbyState> {
     if (lv('STAT_SPD'))   result.speed        += 10  * lv('STAT_SPD');
     // TOUGH, DODGE, BARRIER handled in damagePlayer; SHIELD via shieldHp; FORTIFY per-tick; TAUNT in AI
 
-    if (player.weaponId && EQUIPMENT_DEFS[player.weaponId]) {
-      const mods = scaleModifiers(EQUIPMENT_DEFS[player.weaponId]!.modifiers, player.weaponLevel);
-      result.maxHp        += mods.maxHp        ?? 0;
-      result.attackDamage += mods.attackDamage ?? 0;
-      result.speed        += mods.speed        ?? 0;
-      result.healBonus    += mods.healBonus    ?? 0;
-      result.attackRange  += mods.attackRange  ?? 0;
-    }
-    if (player.weapon2Id && EQUIPMENT_DEFS[player.weapon2Id]) {
-      const mods = scaleModifiers(EQUIPMENT_DEFS[player.weapon2Id]!.modifiers, player.weapon2Level);
-      result.maxHp        += mods.maxHp        ?? 0;
-      result.attackDamage += mods.attackDamage ?? 0;
-      result.speed        += mods.speed        ?? 0;
-      result.healBonus    += mods.healBonus    ?? 0;
-      result.attackRange  += mods.attackRange  ?? 0;
-    }
-    if (player.weapon3Id && EQUIPMENT_DEFS[player.weapon3Id]) {
-      const mods = scaleModifiers(EQUIPMENT_DEFS[player.weapon3Id]!.modifiers, player.weapon3Level);
+    const weaponSlots: Array<[string, number]> = [
+      [player.weaponId,  player.weaponLevel],
+      [player.weapon2Id, player.weapon2Level],
+      [player.weapon3Id, player.weapon3Level],
+      [player.weapon4Id, player.weapon4Level],
+      [player.weapon5Id, player.weapon5Level],
+    ];
+    for (const [wid, wLv] of weaponSlots) {
+      if (!wid || !EQUIPMENT_DEFS[wid]) continue;
+      const mods = scaleModifiers(EQUIPMENT_DEFS[wid]!.modifiers, wLv);
       result.maxHp        += mods.maxHp        ?? 0;
       result.attackDamage += mods.attackDamage ?? 0;
       result.speed        += mods.speed        ?? 0;
@@ -1253,6 +1338,9 @@ export class GameRoom extends Room<LobbyState> {
           this.state.items.delete(itemId);
 
         } else if (item.type === 'WEAPON') {
+          // Skip pickup when weapon isn't equippable by this class — item stays on ground
+          const def = EQUIPMENT_DEFS[item.defId];
+          if (!def || !canClassEquip(def, player.selectedClass)) continue;
           // 9.2: always replace existing weapon
           player.weaponId    = item.defId;
           player.weaponLevel = 0;  // new pickup starts at base level
@@ -1303,8 +1391,11 @@ export class GameRoom extends Room<LobbyState> {
     }
 
     const enemyArr = [...this.state.enemies.values()];
+    const nowMs = Date.now();
+    const slowMult = (eid: string): number => (this.enemySlowUntil.get(eid) ?? 0) > nowMs ? 0.6 : 1;
 
     for (const enemy of enemyArr) {
+      const slow = slowMult(enemy.id);
       // Find nearest player
       let nearestDist = Infinity;
       let nearestTarget: { x: number; y: number; id: string } | null = null;
@@ -1322,13 +1413,13 @@ export class GameRoom extends Room<LobbyState> {
         if (nearestDist > RANGED_ATTACK_DIST + 20) {
           // Close the gap
           const inv = 1 / nearestDist;
-          enemy.x = Math.max(WALL, Math.min(1600 - WALL, enemy.x + dx * inv * RANGED_SPEED * this.DT));
-          enemy.y = Math.max(WALL, Math.min(1200 - WALL, enemy.y + dy * inv * RANGED_SPEED * this.DT));
+          enemy.x = Math.max(WALL, Math.min(1600 - WALL, enemy.x + dx * inv * RANGED_SPEED * slow * this.DT));
+          enemy.y = Math.max(WALL, Math.min(1200 - WALL, enemy.y + dy * inv * RANGED_SPEED * slow * this.DT));
         } else if (nearestDist < RANGED_ATTACK_DIST - 20) {
           // Back away
           const inv = 1 / nearestDist;
-          enemy.x = Math.max(WALL, Math.min(1600 - WALL, enemy.x - dx * inv * RANGED_SPEED * this.DT));
-          enemy.y = Math.max(WALL, Math.min(1200 - WALL, enemy.y - dy * inv * RANGED_SPEED * this.DT));
+          enemy.x = Math.max(WALL, Math.min(1600 - WALL, enemy.x - dx * inv * RANGED_SPEED * slow * this.DT));
+          enemy.y = Math.max(WALL, Math.min(1200 - WALL, enemy.y - dy * inv * RANGED_SPEED * slow * this.DT));
         }
         // Fire every ~1.5 seconds via attackCooldowns (re-use same map)
         const rCooldown = this.attackCooldowns.get(`enemy:${enemy.id}`) ?? 0;
@@ -1353,8 +1444,8 @@ export class GameRoom extends Room<LobbyState> {
         if (nearestDist >= 12) {
           const inv = 1 / nearestDist;
           const speed = enemy.type === 'elite' ? ELITE_SPEED : BASIC_SPEED;
-          enemy.x = Math.max(WALL, Math.min(1600 - WALL, enemy.x + dx * inv * speed * this.DT));
-          enemy.y = Math.max(WALL, Math.min(1200 - WALL, enemy.y + dy * inv * speed * this.DT));
+          enemy.x = Math.max(WALL, Math.min(1600 - WALL, enemy.x + dx * inv * speed * slow * this.DT));
+          enemy.y = Math.max(WALL, Math.min(1200 - WALL, enemy.y + dy * inv * speed * slow * this.DT));
         }
         // Contact damage
         if (nearestDist <= CONTACT_RANGE) {
@@ -1418,9 +1509,51 @@ export class GameRoom extends Room<LobbyState> {
     const WORLD_PAD     = -50;       // remove projectile this far outside world bounds
 
     const toDelete: string[] = [];
+
+    // ORB_WEAPON satellites: orbit around owner, pass-through damage with per-enemy cooldown
+    const ORB_HIT_RADIUS = 24;
+    const ORB_HIT_COOLDOWN = 500;
+    const now = Date.now();
+    for (const [id, orbit] of this.orbitalProjectiles) {
+      const proj = this.state.projectiles.get(id);
+      const owner = this.state.players.get(orbit.ownerId);
+      if (!proj || !owner || now - orbit.spawnMs > orbit.ttlMs) {
+        toDelete.push(id);
+        continue;
+      }
+      const elapsedSec = (now - orbit.spawnMs) / 1000;
+      const angle = orbit.angleOffset + elapsedSec * orbit.spinRate;
+      proj.x = owner.x + Math.cos(angle) * orbit.radius;
+      proj.y = owner.y + Math.sin(angle) * orbit.radius;
+      proj.angle = angle;
+      for (const [eid, enemy] of this.state.enemies) {
+        const dx = enemy.x - proj.x;
+        const dy = enemy.y - proj.y;
+        if (dx * dx + dy * dy > ORB_HIT_RADIUS * ORB_HIT_RADIUS) continue;
+        const last = orbit.hitHistory.get(eid) ?? 0;
+        if (now - last < ORB_HIT_COOLDOWN) continue;
+        orbit.hitHistory.set(eid, now);
+        this.hitEnemy(orbit.ownerId, eid, proj.damage, angle);
+      }
+      if (this.state.gameState === 'BOSS_BATTLE' && this.state.boss.id) {
+        const dxb = this.state.boss.x - proj.x;
+        const dyb = this.state.boss.y - proj.y;
+        if (dxb * dxb + dyb * dyb <= (ORB_HIT_RADIUS + 14) * (ORB_HIT_RADIUS + 14)) {
+          const last = orbit.hitHistory.get('boss') ?? 0;
+          if (now - last >= ORB_HIT_COOLDOWN) {
+            orbit.hitHistory.set('boss', now);
+            this.hitBoss(orbit.ownerId, proj.damage);
+          }
+        }
+      }
+    }
+
     for (const [id, proj] of this.state.projectiles) {
+      if (this.orbitalProjectiles.has(id)) continue;  // handled above
       if (proj.vx === 0 && proj.vy === 0) continue;  // boss projectiles handled separately
 
+      const prevX = proj.x;
+      const prevY = proj.y;
       proj.x += proj.vx * this.DT;
       proj.y += proj.vy * this.DT;
 
@@ -1430,25 +1563,77 @@ export class GameRoom extends Room<LobbyState> {
         continue;
       }
 
-      // Player projectiles (WAND) — check enemy collision
-      if (this.playerProjectileIds.has(id)) {
-        let hit = false;
-        // Check boss first
+      // SHIELD_THROW boomerang: pass-through, reverse at max range, despawn when returned
+      const shield = this.shieldProjectiles.get(id);
+      if (shield) {
+        const enemyR = 22;
+        const bossR = 36;
         if (this.state.gameState === 'BOSS_BATTLE' && this.state.boss.id) {
-          const dx = this.state.boss.x - proj.x;
-          const dy = this.state.boss.y - proj.y;
-          if (dx * dx + dy * dy <= 30 * 30) {
+          if (!shield.hitEnemies.has('boss') &&
+              GameRoom.segmentHitsCircle(prevX, prevY, proj.x, proj.y, this.state.boss.x, this.state.boss.y, bossR)) {
+            shield.hitEnemies.add('boss');
             this.hitBoss(proj.ownerId, proj.damage);
+          }
+        }
+        for (const [eid, enemy] of this.state.enemies) {
+          if (shield.hitEnemies.has(eid)) continue;
+          if (GameRoom.segmentHitsCircle(prevX, prevY, proj.x, proj.y, enemy.x, enemy.y, enemyR)) {
+            shield.hitEnemies.add(eid);
+            this.hitEnemy(proj.ownerId, eid, proj.damage, proj.angle);
+          }
+        }
+        if (shield.phase === 'out') {
+          const dsx = proj.x - shield.startX;
+          const dsy = proj.y - shield.startY;
+          if (dsx * dsx + dsy * dsy >= shield.maxRange * shield.maxRange) {
+            shield.phase = 'back';
+            shield.hitEnemies.clear();  // re-hit on return for double pass damage
+          }
+        } else {
+          const owner = this.state.players.get(proj.ownerId);
+          if (owner) {
+            const dx = owner.x - proj.x;
+            const dy = owner.y - proj.y;
+            const distSq = dx * dx + dy * dy;
+            if (distSq < 30 * 30) {
+              toDelete.push(id);
+              continue;
+            }
+            const dist = Math.sqrt(distSq) || 1;
+            proj.vx = (dx / dist) * 420;
+            proj.vy = (dy / dist) * 420;
+            proj.angle = Math.atan2(dy, dx);
+          } else {
+            toDelete.push(id);
+            continue;
+          }
+        }
+        continue;
+      }
+
+      // Player projectiles — swept collision (segment prevPos→pos vs target circle) prevents tunneling on fast arrows
+      if (this.playerProjectileIds.has(id)) {
+        const enemyR = 22;  // enemy hit radius
+        const bossR  = 36;  // boss hit radius
+        const isCannon = proj.kind === 'CANNON';
+        let hit = false;
+        let hitX = proj.x;
+        let hitY = proj.y;
+        if (this.state.gameState === 'BOSS_BATTLE' && this.state.boss.id) {
+          if (GameRoom.segmentHitsCircle(prevX, prevY, proj.x, proj.y, this.state.boss.x, this.state.boss.y, bossR)) {
+            hitX = this.state.boss.x; hitY = this.state.boss.y;
+            if (isCannon) this.cannonExplode(proj.ownerId, hitX, hitY, proj.damage);
+            else this.hitBoss(proj.ownerId, proj.damage);
             hit = true;
             if (this.state.boss.hp <= 0) this.startPostBossSelection();
           }
         }
         if (!hit) {
           for (const [eid, enemy] of this.state.enemies) {
-            const dx = enemy.x - proj.x;
-            const dy = enemy.y - proj.y;
-            if (dx * dx + dy * dy <= 15 * 15) {
-              this.hitEnemy(proj.ownerId, eid, proj.damage, proj.angle);
+            if (GameRoom.segmentHitsCircle(prevX, prevY, proj.x, proj.y, enemy.x, enemy.y, enemyR)) {
+              hitX = enemy.x; hitY = enemy.y;
+              if (isCannon) this.cannonExplode(proj.ownerId, hitX, hitY, proj.damage);
+              else this.hitEnemy(proj.ownerId, eid, proj.damage, proj.angle);
               hit = true;
               break;
             }
@@ -1473,6 +1658,8 @@ export class GameRoom extends Room<LobbyState> {
     for (const id of toDelete) {
       this.state.projectiles.delete(id);
       this.playerProjectileIds.delete(id);
+      this.shieldProjectiles.delete(id);
+      this.orbitalProjectiles.delete(id);
     }
   }
 
@@ -1500,7 +1687,10 @@ export class GameRoom extends Room<LobbyState> {
 
   private processAutoAttack(): void {
     // Weapon-specific cooldowns (ms)
-    const COOLDOWN: Record<string, number> = { '': 500, SWORD: 600, SPEAR: 700, WAND: 800 };
+    const COOLDOWN: Record<string, number> = {
+      '': 500, SWORD: 600, BOW: 700, WAND: 800,
+      HAMMER: 1100, SHIELD_THROW: 1000, DAGGER: 400, CANNON: 1400, STAFF: 1200, ORB_WEAPON: 1500,
+    };
 
     for (const [sessionId, player] of this.state.players) {
       if (player.isDown || player.isDisconnected) continue;
@@ -1567,30 +1757,33 @@ export class GameRoom extends Room<LobbyState> {
       }
 
       const multiStrikeLv = this.getSkillLevel(player, 'MULTI_STRIKE');
-      const weapon = player.weaponId;
-      const wLv = player.weaponLevel;
-      // Cooldown determined by the fastest weapon equipped (all 3 slots)
-      const w2Cooldown = player.weapon2Id ? Math.max(200, Math.round((COOLDOWN[player.weapon2Id] ?? 500) * (1 - player.weapon2Level * 0.08))) : Infinity;
-      const w3Cooldown = player.weapon3Id ? Math.max(200, Math.round((COOLDOWN[player.weapon3Id] ?? 500) * (1 - player.weapon3Level * 0.08))) : Infinity;
-      const attackCooldown = Math.min(
-        Math.max(200, Math.round((COOLDOWN[weapon] ?? 500) * (1 - wLv * 0.08))),
-        w2Cooldown,
-        w3Cooldown,
-      );
+      // All equipped weapon slots (id, level), skipping empty
+      const slots: Array<{ wid: string; wLv: number; isFirst: boolean }> = [];
+      const pushSlot = (wid: string, wLv: number) => { if (wid) slots.push({ wid, wLv, isFirst: slots.length === 0 }); };
+      pushSlot(player.weaponId,  player.weaponLevel);
+      pushSlot(player.weapon2Id, player.weapon2Level);
+      pushSlot(player.weapon3Id, player.weapon3Level);
+      pushSlot(player.weapon4Id, player.weapon4Level);
+      pushSlot(player.weapon5Id, player.weapon5Level);
+
+      // Cooldown determined by the fastest weapon equipped
+      let attackCooldown = Math.max(200, Math.round((COOLDOWN[''] ?? 500)));
+      if (slots.length > 0) {
+        attackCooldown = Math.min(
+          ...slots.map(s => Math.max(200, Math.round((COOLDOWN[s.wid] ?? 500) * (1 - s.wLv * 0.08)))),
+        );
+      }
 
       // ===================== BOSS BATTLE =====================
       if (this.state.gameState === 'BOSS_BATTLE') {
         const boss = this.state.boss;
         if (!boss.id || boss.hp <= 0) continue;
 
-        const firedW1 = this.fireWeaponAtBoss(sessionId, player, weapon, wLv, attackDamage, multiStrikeLv, stats);
-        const firedW2 = player.weapon2Id
-          ? this.fireWeaponAtBoss(sessionId, player, player.weapon2Id, player.weapon2Level, attackDamage, 0, stats)
-          : false;
-        const firedW3 = player.weapon3Id
-          ? this.fireWeaponAtBoss(sessionId, player, player.weapon3Id, player.weapon3Level, attackDamage, 0, stats)
-          : false;
-        if (!firedW1 && !firedW2 && !firedW3) continue;
+        let anyFired = false;
+        for (const s of slots) {
+          if (this.fireWeaponAtBoss(sessionId, player, s.wid, s.wLv, attackDamage, s.isFirst ? multiStrikeLv : 0, stats)) anyFired = true;
+        }
+        if (!anyFired) continue;
 
         this.attackCooldowns.set(sessionId, attackCooldown);
         if (this.state.boss.hp <= 0 && this.state.gameState === 'BOSS_BATTLE') this.startPostBossSelection();
@@ -1600,11 +1793,19 @@ export class GameRoom extends Room<LobbyState> {
       // ===================== SURVIVAL PHASE =====================
       // Find nearest enemy using the longest weapon range across all equipped slots
       const weaponSearchRange = (wid: string, lv: number) =>
-        wid === 'WAND' ? 380 + lv * 20 : wid === 'SPEAR' ? 280 + lv * 30 : wid === 'SWORD' ? 150 + lv * 20 : stats.attackRange;
-      const w1SearchRange = weapon ? weaponSearchRange(weapon, wLv) : 0;
-      const w2SearchRange = player.weapon2Id ? weaponSearchRange(player.weapon2Id, player.weapon2Level) : 0;
-      const w3SearchRange = player.weapon3Id ? weaponSearchRange(player.weapon3Id, player.weapon3Level) : 0;
-      const SEARCH_RANGE = Math.max(w1SearchRange, w2SearchRange, w3SearchRange);
+        wid === 'WAND' ? 380 + lv * 20
+        : wid === 'BOW' ? 360 + lv * 20
+        : wid === 'SWORD' ? 150 + lv * 20
+        : wid === 'HAMMER' ? 180 + lv * 20
+        : wid === 'DAGGER' ? 140 + lv * 10
+        : wid === 'CANNON' ? 420 + lv * 20
+        : wid === 'STAFF' ? 220 + lv * 20
+        : wid === 'SHIELD_THROW' ? 300 + lv * 20
+        : wid === 'ORB_WEAPON' ? 160
+        : stats.attackRange;
+      const SEARCH_RANGE = slots.length > 0
+        ? Math.max(...slots.map(s => weaponSearchRange(s.wid, s.wLv)))
+        : stats.attackRange;
 
       let nearestId: string | null = null;
       let nearestDist = Infinity;
@@ -1619,14 +1820,11 @@ export class GameRoom extends Room<LobbyState> {
       const nearestEnemy = this.state.enemies.get(nearestId)!;
       const aimAngle = Math.atan2(nearestEnemy.y - player.y, nearestEnemy.x - player.x);
 
-      const firedW1 = this.fireWeaponAtEnemies(sessionId, player, weapon, wLv, attackDamage, multiStrikeLv, stats, nearestId, nearestEnemy, aimAngle);
-      const firedW2 = player.weapon2Id
-        ? this.fireWeaponAtEnemies(sessionId, player, player.weapon2Id, player.weapon2Level, attackDamage, 0, stats, nearestId, nearestEnemy, aimAngle)
-        : false;
-      const firedW3 = player.weapon3Id
-        ? this.fireWeaponAtEnemies(sessionId, player, player.weapon3Id, player.weapon3Level, attackDamage, 0, stats, nearestId, nearestEnemy, aimAngle)
-        : false;
-      if (!firedW1 && !firedW2 && !firedW3) continue;
+      let anyFired = false;
+      for (const s of slots) {
+        if (this.fireWeaponAtEnemies(sessionId, player, s.wid, s.wLv, attackDamage, s.isFirst ? multiStrikeLv : 0, stats, nearestId, nearestEnemy, aimAngle)) anyFired = true;
+      }
+      if (!anyFired) continue;
 
       this.attackCooldowns.set(sessionId, attackCooldown);
     }
@@ -1649,14 +1847,68 @@ export class GameRoom extends Room<LobbyState> {
       const spread = 0.22;
       const halfSpread = ((projCount - 1) / 2) * spread;
       for (let p = 0; p < projCount; p++) {
-        this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle - halfSpread + p * spread, attackDamage);
+        this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle - halfSpread + p * spread, attackDamage, 'ORB', 320);
       }
-      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle + 0.35, Math.round(attackDamage * 0.6));
+      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle + 0.35, Math.round(attackDamage * 0.6), 'ORB', 320);
+      return true;
+    }
+    if (weapon === 'BOW') {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const bowRange = 360 + wLv * 20;
+      if (dist > bowRange) return false;
+      const baseAngle = Math.atan2(dy, dx);
+      const arrowCount = wLv >= 4 ? 3 : wLv >= 2 ? 2 : 1;
+      const spread = 0.12;
+      const halfSpread = ((arrowCount - 1) / 2) * spread;
+      for (let a = 0; a < arrowCount; a++) {
+        this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle - halfSpread + a * spread, attackDamage, 'ARROW', 500);
+      }
+      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle + 0.25, Math.round(attackDamage * 0.6), 'ARROW', 500);
+      return true;
+    }
+    if (weapon === 'HAMMER') {
+      const radius = 180 + wLv * 20;
+      if (dx * dx + dy * dy > radius * radius) return false;
+      this.fireHammerShockwave(sessionId, player, wLv, attackDamage, multiStrikeLv);
+      return true;
+    }
+    if (weapon === 'DAGGER') {
+      const range = 140 + wLv * 10;
+      if (dx * dx + dy * dy > range * range) return false;
+      const baseAngle = Math.atan2(dy, dx);
+      this.hitBoss(sessionId, attackDamage);
+      if (multiStrikeLv > 0) this.hitBoss(sessionId, Math.round(attackDamage * (0.3 + multiStrikeLv * 0.2)));
+      this.broadcast('DAGGER_FX', { x: player.x, y: player.y, targets: [{ x: boss.x, y: boss.y }], angle: baseAngle });
+      return true;
+    }
+    if (weapon === 'CANNON') {
+      const cannonRange = 420 + wLv * 20;
+      if (dx * dx + dy * dy > cannonRange * cannonRange) return false;
+      const baseAngle = Math.atan2(dy, dx);
+      this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle, attackDamage, 'CANNON', 200);
+      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, baseAngle + 0.2, Math.round(attackDamage * 0.6), 'CANNON', 200);
+      return true;
+    }
+    if (weapon === 'STAFF') {
+      const radius = 220 + wLv * 20;
+      if (dx * dx + dy * dy > radius * radius) return false;
+      this.fireStaffPulse(sessionId, player, wLv, attackDamage, multiStrikeLv);
+      return true;
+    }
+    if (weapon === 'SHIELD_THROW') {
+      const shieldRange = 300 + wLv * 20;
+      if (dx * dx + dy * dy > shieldRange * shieldRange) return false;
+      const baseAngle = Math.atan2(dy, dx);
+      this.fireShieldBoomerang(sessionId, player, baseAngle, attackDamage, shieldRange);
+      if (multiStrikeLv > 0) this.fireShieldBoomerang(sessionId, player, baseAngle + 0.25, Math.round(attackDamage * 0.6), shieldRange);
+      return true;
+    }
+    if (weapon === 'ORB_WEAPON') {
+      this.fireOrbitals(sessionId, player, wLv, attackDamage, multiStrikeLv);
       return true;
     }
     const swordRange = 150 + wLv * 20;
-    const spearRange = 300 + wLv * 30;
-    const bossRange = weapon === 'SPEAR' ? spearRange : weapon === 'SWORD' ? swordRange : stats.attackRange;
+    const bossRange = weapon === 'SWORD' ? swordRange : stats.attackRange;
     if (dx * dx + dy * dy > bossRange * bossRange) return false;
     this.hitBoss(sessionId, attackDamage);
     if (multiStrikeLv > 0) this.hitBoss(sessionId, Math.round(attackDamage * (0.3 + multiStrikeLv * 0.2)));
@@ -1679,9 +1931,23 @@ export class GameRoom extends Room<LobbyState> {
       const spread = 0.22;
       const halfSpread = ((projCount - 1) / 2) * spread;
       for (let p = 0; p < projCount; p++) {
-        this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle - halfSpread + p * spread, attackDamage);
+        this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle - halfSpread + p * spread, attackDamage, 'ORB', 320);
       }
-      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle + 0.35, Math.round(attackDamage * 0.6));
+      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle + 0.35, Math.round(attackDamage * 0.6), 'ORB', 320);
+      return true;
+    }
+    if (weapon === 'BOW') {
+      const bowRange = 360 + wLv * 20;
+      const dx = nearestEnemy.x - player.x;
+      const dy = nearestEnemy.y - player.y;
+      if (dx * dx + dy * dy > bowRange * bowRange) return false;
+      const arrowCount = wLv >= 4 ? 3 : wLv >= 2 ? 2 : 1;
+      const spread = 0.12;
+      const halfSpread = ((arrowCount - 1) / 2) * spread;
+      for (let a = 0; a < arrowCount; a++) {
+        this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle - halfSpread + a * spread, attackDamage, 'ARROW', 500);
+      }
+      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle + 0.25, Math.round(attackDamage * 0.6), 'ARROW', 500);
       return true;
     }
     if (weapon === 'SWORD') {
@@ -1700,20 +1966,63 @@ export class GameRoom extends Room<LobbyState> {
       }
       return fired;
     }
-    if (weapon === 'SPEAR') {
-      const sRange = 280 + wLv * 30;
-      const halfWidth = 25 + wLv * 5 + multiStrikeLv * 10;
-      const cosA = Math.cos(aimAngle);
-      const sinA = Math.sin(aimAngle);
-      let fired = false;
+    if (weapon === 'HAMMER') {
+      const radius = 180 + wLv * 20;
+      const dx0 = nearestEnemy.x - player.x;
+      const dy0 = nearestEnemy.y - player.y;
+      if (dx0 * dx0 + dy0 * dy0 > radius * radius) return false;
+      this.fireHammerShockwave(sessionId, player, wLv, attackDamage, multiStrikeLv);
+      return true;
+    }
+    if (weapon === 'DAGGER') {
+      const range = 140 + wLv * 10;
+      const dx0 = nearestEnemy.x - player.x;
+      const dy0 = nearestEnemy.y - player.y;
+      if (dx0 * dx0 + dy0 * dy0 > range * range) return false;
+      const maxTargets = 2 + Math.floor(wLv / 2) + (multiStrikeLv > 0 ? 1 : 0);
+      const candidates: Array<{ id: string; x: number; y: number; dist: number }> = [];
       for (const [id, enemy] of this.state.enemies) {
-        const dx = enemy.x - player.x;
-        const dy = enemy.y - player.y;
-        const along = dx * cosA + dy * sinA;
-        const perp  = Math.abs(-dx * sinA + dy * cosA);
-        if (along > 0 && along <= sRange && perp <= halfWidth) { this.hitEnemy(sessionId, id, attackDamage, aimAngle); fired = true; }
+        const ex = enemy.x - player.x;
+        const ey = enemy.y - player.y;
+        const d = ex * ex + ey * ey;
+        if (d > range * range) continue;
+        candidates.push({ id, x: enemy.x, y: enemy.y, dist: d });
       }
-      return fired;
+      candidates.sort((a, b) => a.dist - b.dist);
+      const picks = candidates.slice(0, maxTargets);
+      for (const t of picks) this.hitEnemy(sessionId, t.id, attackDamage, aimAngle);
+      this.broadcast('DAGGER_FX', { x: player.x, y: player.y, targets: picks.map(t => ({ x: t.x, y: t.y })), angle: aimAngle });
+      return picks.length > 0;
+    }
+    if (weapon === 'CANNON') {
+      const cRange = 420 + wLv * 20;
+      const dx0 = nearestEnemy.x - player.x;
+      const dy0 = nearestEnemy.y - player.y;
+      if (dx0 * dx0 + dy0 * dy0 > cRange * cRange) return false;
+      this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle, attackDamage, 'CANNON', 200);
+      if (multiStrikeLv > 0) this.firePlayerProjectile(sessionId, player.x, player.y, aimAngle + 0.2, Math.round(attackDamage * 0.6), 'CANNON', 200);
+      return true;
+    }
+    if (weapon === 'STAFF') {
+      const radius = 220 + wLv * 20;
+      const dx0 = nearestEnemy.x - player.x;
+      const dy0 = nearestEnemy.y - player.y;
+      if (dx0 * dx0 + dy0 * dy0 > radius * radius) return false;
+      this.fireStaffPulse(sessionId, player, wLv, attackDamage, multiStrikeLv);
+      return true;
+    }
+    if (weapon === 'SHIELD_THROW') {
+      const shieldRange = 300 + wLv * 20;
+      const dx0 = nearestEnemy.x - player.x;
+      const dy0 = nearestEnemy.y - player.y;
+      if (dx0 * dx0 + dy0 * dy0 > shieldRange * shieldRange) return false;
+      this.fireShieldBoomerang(sessionId, player, aimAngle, attackDamage, shieldRange);
+      if (multiStrikeLv > 0) this.fireShieldBoomerang(sessionId, player, aimAngle + 0.25, Math.round(attackDamage * 0.6), shieldRange);
+      return true;
+    }
+    if (weapon === 'ORB_WEAPON') {
+      this.fireOrbitals(sessionId, player, wLv, attackDamage, multiStrikeLv);
+      return true;
     }
     // Default (no weapon): single-target melee
     const dx = nearestEnemy.x - player.x;
@@ -1750,6 +2059,7 @@ export class GameRoom extends Room<LobbyState> {
       const wasElite = enemy.type === 'elite';
       this.state.enemies.delete(enemyId);
       this.attackCooldowns.delete(enemyId);
+      this.enemySlowUntil.delete(enemyId);
       this.shareKillXp(sessionId, wasElite ? 50 : 30);
       this.restoreHp(sessionId, wasElite ? 10 : 3);
       if (!wasElite && this.state.gameState === 'SURVIVAL_PHASE') {
@@ -1777,17 +2087,156 @@ export class GameRoom extends Room<LobbyState> {
     if (this.getSkillLevel(player, 'LIFESTEAL') > 0) this.restoreHp(sessionId, Math.round(damage * 0.2));
   }
 
-  /** Fires a player-owned projectile (WAND). Tracked in playerProjectileIds for collision. */
-  private firePlayerProjectile(sessionId: string, x: number, y: number, angle: number, damage: number): void {
+  /** True if line segment (ax,ay)→(bx,by) intersects circle at (cx,cy) radius r. */
+  private static segmentHitsCircle(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, r: number): boolean {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) {
+      const ex = cx - ax;
+      const ey = cy - ay;
+      return ex * ex + ey * ey <= r * r;
+    }
+    const t = Math.max(0, Math.min(1, ((cx - ax) * dx + (cy - ay) * dy) / lenSq));
+    const px = ax + t * dx - cx;
+    const py = ay + t * dy - cy;
+    return px * px + py * py <= r * r;
+  }
+
+  /** HAMMER shockwave: AOE damage + knockback on all enemies in radius. */
+  private fireHammerShockwave(sessionId: string, player: PlayerSchema, wLv: number, attackDamage: number, multiStrikeLv: number): void {
+    const radius  = 180 + wLv * 20;
+    const knockback = 80 + wLv * 10;
+    const dmgMult = 1 + multiStrikeLv * 0.25;
+    const dmg = Math.round(attackDamage * dmgMult);
+    for (const [id, enemy] of this.state.enemies) {
+      const dx = enemy.x - player.x;
+      const dy = enemy.y - player.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq > radius * radius) continue;
+      const dist = Math.sqrt(distSq) || 1;
+      const nx = dx / dist;
+      const ny = dy / dist;
+      enemy.x = Math.max(20, Math.min(1580, enemy.x + nx * knockback));
+      enemy.y = Math.max(20, Math.min(1180, enemy.y + ny * knockback));
+      this.hitEnemy(sessionId, id, dmg, Math.atan2(dy, dx));
+    }
+    if (this.state.gameState === 'BOSS_BATTLE' && this.state.boss.id) {
+      const dxb = this.state.boss.x - player.x;
+      const dyb = this.state.boss.y - player.y;
+      if (dxb * dxb + dyb * dyb <= radius * radius) this.hitBoss(sessionId, dmg);
+    }
+    this.broadcast('HAMMER_FX', { x: player.x, y: player.y, radius });
+  }
+
+  /** STAFF pulse: heal teammates + slow+damage enemies in radius. */
+  private fireStaffPulse(sessionId: string, player: PlayerSchema, wLv: number, attackDamage: number, multiStrikeLv: number): void {
+    const radius = 220 + wLv * 20;
+    const healBonus = this.getEffectiveStats(player).healBonus;
+    const healAmount = Math.round((5 + wLv * 2) * (1 + healBonus));
+    const dmg = Math.round(attackDamage * (0.5 + multiStrikeLv * 0.15));
+    const slowUntil = Date.now() + 1500;
+
+    for (const [, mate] of this.state.players) {
+      if (mate.isDown || mate.isDisconnected) continue;
+      const dx = mate.x - player.x;
+      const dy = mate.y - player.y;
+      if (dx * dx + dy * dy > radius * radius) continue;
+      mate.hp = Math.min(mate.maxHp, mate.hp + healAmount);
+    }
+    for (const [eid, enemy] of this.state.enemies) {
+      const dx = enemy.x - player.x;
+      const dy = enemy.y - player.y;
+      if (dx * dx + dy * dy > radius * radius) continue;
+      this.enemySlowUntil.set(eid, slowUntil);
+      this.hitEnemy(sessionId, eid, dmg, Math.atan2(dy, dx));
+    }
+    if (this.state.gameState === 'BOSS_BATTLE' && this.state.boss.id) {
+      const dxb = this.state.boss.x - player.x;
+      const dyb = this.state.boss.y - player.y;
+      if (dxb * dxb + dyb * dyb <= radius * radius) this.hitBoss(sessionId, dmg);
+    }
+    this.broadcast('STAFF_FX', { x: player.x, y: player.y, radius });
+  }
+
+  /** SHIELD_THROW boomerang: projectile passes through enemies, reverses at maxRange, returns to owner. */
+  private fireShieldBoomerang(sessionId: string, player: PlayerSchema, angle: number, damage: number, maxRange: number): void {
+    const proj = new ProjectileSchema();
+    proj.id      = crypto.randomUUID();
+    proj.ownerId = sessionId;
+    proj.x       = player.x;
+    proj.y       = player.y;
+    proj.angle   = angle;
+    proj.vx      = Math.cos(angle) * 380;
+    proj.vy      = Math.sin(angle) * 380;
+    proj.damage  = damage;
+    proj.kind    = 'SHIELD';
+    this.state.projectiles.set(proj.id, proj);
+    this.playerProjectileIds.add(proj.id);
+    this.shieldProjectiles.set(proj.id, {
+      phase: 'out', startX: player.x, startY: player.y, maxRange, hitEnemies: new Set(),
+    });
+  }
+
+  /** ORB_WEAPON: spawn orbiting satellites around the player with a TTL. */
+  private fireOrbitals(sessionId: string, player: PlayerSchema, wLv: number, attackDamage: number, multiStrikeLv: number): void {
+    const count = 1 + Math.floor(wLv / 2) + (multiStrikeLv > 0 ? 1 : 0);
+    const ttlMs = 2000;
+    const radius = 70;
+    const spinRate = 3.5;  // rad/s
+    const now = Date.now();
+    for (let i = 0; i < count; i++) {
+      const angleOffset = (i / count) * Math.PI * 2;
+      const proj = new ProjectileSchema();
+      proj.id      = crypto.randomUUID();
+      proj.ownerId = sessionId;
+      proj.x       = player.x + Math.cos(angleOffset) * radius;
+      proj.y       = player.y + Math.sin(angleOffset) * radius;
+      proj.angle   = angleOffset;
+      proj.vx      = 0;
+      proj.vy      = 0;
+      proj.damage  = attackDamage;
+      proj.kind    = 'SATELLITE';
+      this.state.projectiles.set(proj.id, proj);
+      this.playerProjectileIds.add(proj.id);
+      this.orbitalProjectiles.set(proj.id, {
+        ownerId: sessionId, angleOffset, spawnMs: now, ttlMs, radius, spinRate, hitHistory: new Map(),
+      });
+    }
+  }
+
+  /** CANNON explosion: AOE damage around impact point. */
+  private cannonExplode(ownerId: string, x: number, y: number, damage: number): void {
+    const radius = 70;
+    for (const [eid, enemy] of this.state.enemies) {
+      const dx = enemy.x - x;
+      const dy = enemy.y - y;
+      if (dx * dx + dy * dy <= radius * radius) this.hitEnemy(ownerId, eid, damage, Math.atan2(dy, dx));
+    }
+    if (this.state.gameState === 'BOSS_BATTLE' && this.state.boss.id) {
+      const dxb = this.state.boss.x - x;
+      const dyb = this.state.boss.y - y;
+      if (dxb * dxb + dyb * dyb <= radius * radius) this.hitBoss(ownerId, damage);
+    }
+    this.broadcast('EXPLOSION_FX', { x, y, radius });
+  }
+
+  /** Fires a player-owned projectile. Tracked in playerProjectileIds for collision.
+   *  kind: 'ORB' (WAND, 320 default) | 'ARROW' (BOW, 500) | 'CANNON' (CANNON, 200, explodes on hit). */
+  private firePlayerProjectile(
+    sessionId: string, x: number, y: number, angle: number, damage: number,
+    kind: string = 'ORB', speed: number = 320,
+  ): void {
     const proj = new ProjectileSchema();
     proj.id      = crypto.randomUUID();
     proj.ownerId = sessionId;
     proj.x       = x;
     proj.y       = y;
     proj.angle   = angle;
-    proj.vx      = Math.cos(angle) * 320;
-    proj.vy      = Math.sin(angle) * 320;
+    proj.vx      = Math.cos(angle) * speed;
+    proj.vy      = Math.sin(angle) * speed;
     proj.damage  = damage;
+    proj.kind    = kind;
     this.state.projectiles.set(proj.id, proj);
     this.playerProjectileIds.add(proj.id);
   }
@@ -1844,7 +2293,7 @@ export class GameRoom extends Room<LobbyState> {
   private applyClassStats(): void {
     const CLASS_STARTING_WEAPON: Record<string, string> = {
       TANK:    'SWORD',
-      DAMAGE:  'SPEAR',
+      DAMAGE:  'BOW',
       SUPPORT: 'WAND',
     };
     for (const [, player] of this.state.players) {
@@ -2075,6 +2524,10 @@ export class GameRoom extends Room<LobbyState> {
     this.postBossOptions.clear();
     this.lastDownedAt.clear();
     this.inputBuffer.clear();
+    this.playerProjectileIds.clear();
+    this.shieldProjectiles.clear();
+    this.orbitalProjectiles.clear();
+    this.enemySlowUntil.clear();
 
     // Reset each player to lobby state
     for (const [, player] of this.state.players) {
@@ -2089,6 +2542,10 @@ export class GameRoom extends Room<LobbyState> {
       player.weapon2Level = 0;
       player.weapon3Id = '';
       player.weapon3Level = 0;
+      player.weapon4Id = '';
+      player.weapon4Level = 0;
+      player.weapon5Id = '';
+      player.weapon5Level = 0;
       player.passiveIds.splice(0, player.passiveIds.length);
       player.passiveLevels.splice(0, player.passiveLevels.length);
       player.isDown = false;
